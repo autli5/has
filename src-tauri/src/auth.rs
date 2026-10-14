@@ -195,6 +195,14 @@ pub fn verify_password(provided: &str, stored: &str) -> bool {
     provided == stored
 }
 
+pub fn get_error_message(e: &tokio_postgres::Error) -> String {
+    if let Some(dbe) = e.as_db_error() {
+        dbe.message().to_string()
+    } else {
+        e.to_string()
+    }
+}
+
 pub async fn check_db_health() -> DbStatus {
     let config = get_db_config();
     match connect_to_db(&config).await {
@@ -210,7 +218,7 @@ pub async fn check_db_health() -> DbStatus {
                     connected: false,
                     host: config.host.clone(),
                     dbname: config.dbname.clone(),
-                    message: format!("Ошибка выполнения запроса: {}", e),
+                    message: format!("Ошибка выполнения запроса: {}", get_error_message(&e)),
                 },
             }
         }
@@ -255,6 +263,19 @@ pub async fn authenticate_user(email: &str, password: &str) -> AuthResponse {
         };
     }
 
+    // Auto-create table if standard 'users' table
+    if config.users_table == "users" && config.email_column == "email" && config.password_column == "password" {
+        let create_table_sql = "
+            CREATE TABLE IF NOT EXISTS users (
+                id SERIAL PRIMARY KEY,
+                email VARCHAR(255) UNIQUE NOT NULL,
+                password TEXT NOT NULL,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            );
+        ";
+        let _ = client.batch_execute(create_table_sql).await;
+    }
+
     let query = format!(
         "SELECT {} FROM {} WHERE LOWER({}) = LOWER($1) LIMIT 1",
         config.password_column, config.users_table, config.email_column
@@ -294,17 +315,23 @@ pub async fn authenticate_user(email: &str, password: &str) -> AuthResponse {
             user: None,
         },
         Err(e) => {
-            let err_str = e.to_string();
-            if err_str.contains("does not exist") {
+            let msg = get_error_message(&e);
+            if msg.contains("does not exist") || msg.contains("не существует") {
                 AuthResponse {
                     success: false,
-                    message: format!("Таблица '{}' не найдена в базе данных. Проверьте DB_USERS_TABLE в .env", config.users_table),
+                    message: format!("Таблица '{}' не найдена в базе данных. Зарегистрируйтесь, чтобы создать её.", config.users_table),
+                    user: None,
+                }
+            } else if msg.contains("permission denied") || msg.contains("отказано в доступе") {
+                AuthResponse {
+                    success: false,
+                    message: format!("Отказано в доступе к таблице '{}' для пользователя '{}'. Проверьте права в PostgreSQL.", config.users_table, config.user),
                     user: None,
                 }
             } else {
                 AuthResponse {
                     success: false,
-                    message: format!("Ошибка запроса к БД: {}", e),
+                    message: format!("Ошибка запроса к БД: {}", msg),
                     user: None,
                 }
             }
@@ -371,8 +398,8 @@ pub async fn register_user(email: &str, password: &str) -> AuthResponse {
             }),
         },
         Err(e) => {
-            let err_str = e.to_string();
-            if err_str.contains("unique") || err_str.contains("duplicate") {
+            let err_str = get_error_message(&e);
+            if err_str.contains("unique") || err_str.contains("duplicate") || err_str.contains("уже существует") {
                 AuthResponse {
                     success: false,
                     message: "Пользователь с таким email уже существует".to_string(),
@@ -381,7 +408,7 @@ pub async fn register_user(email: &str, password: &str) -> AuthResponse {
             } else {
                 AuthResponse {
                     success: false,
-                    message: format!("Ошибка сохранения: {}", e),
+                    message: format!("Ошибка сохранения: {}", err_str),
                     user: None,
                 }
             }

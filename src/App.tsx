@@ -830,10 +830,10 @@ export default function App() {
       {/* Footer */}
       <footer className="app-footer">
         <div>Copyright © 2026 Home Autli Server</div>
-        <div className="footer-links">
+        {/*<div className="footer-links">
           <span>Политика конфиденциальности</span>
           <span>Условия использования</span>
-        </div>
+        </div>*/}
       </footer>
 
       {/* Database Diagnostics Modal */}
