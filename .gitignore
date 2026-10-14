@@ -27,3 +27,6 @@ dist-ssr
 .env
 .env.local
 .env.*.local
+
+# Tauri update private signing key (KEEP SECRET!)
+src-tauri/*.key

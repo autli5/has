@@ -100,6 +100,139 @@ body {
   box-shadow: 0 0 6px rgba(239, 68, 68, 0.6);
 }
 
+/* ========================================================
+   AUTO-UPDATER BANNER
+   ======================================================== */
+
+.updater-banner {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 200;
+  background: #1e293b;
+  border-radius: 14px;
+  padding: 14px 18px;
+  max-width: 420px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+  animation: slideInUp 0.3s ease;
+}
+
+@keyframes slideInUp {
+  from { transform: translateY(20px); opacity: 0; }
+  to   { transform: translateY(0);   opacity: 1; }
+}
+
+.updater-banner-content {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.updater-icon {
+  font-size: 22px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.updater-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+}
+
+.updater-text strong {
+  font-size: 13.5px;
+  color: #f1f5f9;
+  font-weight: 700;
+}
+
+.updater-notes {
+  font-size: 12px;
+  color: #94a3b8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.updater-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.updater-btn-install {
+  padding: 7px 14px;
+  background: #4f46e5;
+  color: #ffffff;
+  border: none;
+  border-radius: 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+
+.updater-btn-install:hover {
+  background: #4338ca;
+}
+
+.updater-btn-dismiss {
+  padding: 5px 14px;
+  background: transparent;
+  color: #64748b;
+  border: none;
+  font-size: 12px;
+  cursor: pointer;
+  text-align: center;
+  transition: color 0.15s;
+}
+
+.updater-btn-dismiss:hover {
+  color: #94a3b8;
+}
+
+.updater-progress-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 140px;
+}
+
+.updater-progress-bar {
+  flex: 1;
+  height: 6px;
+  background: #334155;
+  border-radius: 9999px;
+  overflow: hidden;
+}
+
+.updater-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #6366f1, #4f46e5);
+  border-radius: 9999px;
+  transition: width 0.2s ease;
+}
+
+.updater-progress-label {
+  font-size: 12px;
+  color: #94a3b8;
+  min-width: 30px;
+  text-align: right;
+}
+
+.updater-error {
+  margin-top: 8px;
+  font-size: 11.5px;
+  color: #f87171;
+  padding: 6px 8px;
+  background: rgba(239, 68, 68, 0.1);
+  border-radius: 6px;
+}
+
 /* Center Content Area */
 .auth-main-container {
   flex: 1;

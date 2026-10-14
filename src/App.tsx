@@ -15,6 +15,7 @@ import {
 } from "./components/Icons";
 import { AuthResponse, DbStatus, ResetRequestResponse, SafeDbInfo, UserDto } from "./types";
 import { OtpInput } from "./components/OtpInput";
+import { UpdaterBanner } from "./components/UpdaterBanner";
 import "./App.css";
 
 const isTauri = () => {
@@ -325,6 +326,9 @@ export default function App() {
 
   return (
     <div className="app-viewport">
+      {/* Auto-updater banner */}
+      <UpdaterBanner />
+
       {/* Top Header / DB Connection Pill */}
       <header className="top-bar">
         <button
