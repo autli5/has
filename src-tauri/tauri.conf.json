@@ -13,8 +13,11 @@
     "windows": [
       {
         "title": "Home Autli Server",
-        "width": 800,
-        "height": 600
+        "width": 920,
+        "height": 720,
+        "minWidth": 440,
+        "minHeight": 580,
+        "center": true
       }
     ],
     "security": {
