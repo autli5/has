@@ -17,6 +17,7 @@ import { AuthResponse, DbStatus, ResetRequestResponse, SafeDbInfo, UserDto } fro
 import { OtpInput } from "./components/OtpInput";
 import { UpdaterBanner } from "./components/UpdaterBanner";
 import "./App.css";
+import Dashboard from "./pages/Dashboard";
 
 const isTauri = () => {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -338,7 +339,6 @@ export default function App() {
           title="Нажмите для просмотра параметров .env и статуса БД"
         >
           <span className="db-dot"></span>
-          <DatabaseIcon className="w-4 h-4" />
           <span>
             {dbStatus?.connected
               ? `PostgreSQL: ${dbStatus.host}`
@@ -349,43 +349,12 @@ export default function App() {
 
       {/* Main Content Area */}
       {currentUser ? (
-        /* Authenticated Dashboard — simple welcome card */
-        <main className="dashboard-container">
-          <div className="dashboard-card">
-            <div className="dashboard-avatar">
-              <span style={{ fontSize: 28, fontWeight: 700 }}>
-                {currentUser.email.charAt(0).toUpperCase()}
-              </span>
-            </div>
-            <h2 className="dashboard-title">Добро пожаловать!</h2>
-            <p className="dashboard-subtitle">{currentUser.email}</p>
-
-            <div className="info-grid">
-              <div className="info-item">
-                <div className="info-item-label">Статус сессии</div>
-                <div className="info-item-value" style={{ color: "#10b981" }}>
-                  ● Авторизован
-                </div>
-              </div>
-              <div className="info-item">
-                <div className="info-item-label">Сервер PostgreSQL</div>
-                <div className="info-item-value">{dbInfo?.host || dbStatus?.host || "Удаленный хост"}</div>
-              </div>
-              <div className="info-item">
-                <div className="info-item-label">База данных</div>
-                <div className="info-item-value">{dbInfo?.dbname || "postgres"}</div>
-              </div>
-              <div className="info-item">
-                <div className="info-item-label">Таблица пользователей</div>
-                <div className="info-item-value">{dbInfo?.users_table || "users"}</div>
-              </div>
-            </div>
-
-            <button type="button" className="btn-primary" onClick={handleLogout}>
-              Выйти из аккаунта
-            </button>
-          </div>
-        </main>
+        <Dashboard
+          user={currentUser}
+          dbInfo={dbInfo}
+          dbStatus={dbStatus}
+          onLogout={handleLogout}
+        />
       ) : mode === "reset" ? (
         /* Password Reset Flow */
         <main className="auth-main-container">
@@ -787,7 +756,6 @@ export default function App() {
                 ) : (
                   <>
                     <span>{mode === "login" ? "Войти" : "Зарегистрироваться"}</span>
-                    <ArrowRightLoginIcon className="w-5 h-5" />
                   </>
                 )}
               </button>
