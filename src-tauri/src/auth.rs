@@ -71,25 +71,45 @@ pub fn load_env() {
     }
 }
 
+pub fn extract_clean_env(key: &str, default: &str) -> String {
+    env::var(key)
+        .map(|v| {
+            let trimmed = v.trim();
+            let clean = if let Some((c, _)) = trimmed.split_once('#') {
+                c.trim()
+            } else {
+                trimmed
+            };
+            if clean.is_empty() {
+                default.to_string()
+            } else {
+                clean.to_string()
+            }
+        })
+        .unwrap_or_else(|_| default.to_string())
+}
+
 pub fn get_db_config() -> DbConfig {
     load_env();
 
-    let database_url = env::var("DATABASE_URL").ok();
-    let host = env::var("DB_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
-    let port = env::var("DB_PORT")
-        .ok()
-        .and_then(|p| p.parse::<u16>().ok())
+    let database_url = env::var("DATABASE_URL").ok().filter(|s| !s.trim().is_empty());
+    let host = extract_clean_env("DB_HOST", "80.237.77.141");
+    let port = extract_clean_env("DB_PORT", "5432")
+        .parse::<u16>()
         .unwrap_or(5432);
-    let user = env::var("DB_USER").unwrap_or_else(|_| "postgres".to_string());
-    let password = env::var("DB_PASSWORD").ok();
-    let dbname = env::var("DB_NAME").unwrap_or_else(|_| "postgres".to_string());
-    let ssl_mode = env::var("DB_SSL_MODE")
-        .unwrap_or_else(|_| "prefer".to_string())
-        .to_lowercase();
+    let user = extract_clean_env("DB_USER", "uj3v230o");
+    let pass_str = extract_clean_env("DB_PASSWORD", "48758ef4");
+    let password = if !pass_str.is_empty() {
+        Some(pass_str)
+    } else {
+        Some("48758ef4".to_string())
+    };
+    let dbname = extract_clean_env("DB_NAME", "has");
+    let ssl_mode = extract_clean_env("DB_SSL_MODE", "prefer").to_lowercase();
 
-    let users_table = env::var("DB_USERS_TABLE").unwrap_or_else(|_| "users".to_string());
-    let email_column = env::var("DB_EMAIL_COLUMN").unwrap_or_else(|_| "email".to_string());
-    let password_column = env::var("DB_PASSWORD_COLUMN").unwrap_or_else(|_| "password".to_string());
+    let users_table = extract_clean_env("DB_USERS_TABLE", "users");
+    let email_column = extract_clean_env("DB_EMAIL_COLUMN", "email");
+    let password_column = extract_clean_env("DB_PASSWORD_COLUMN", "password");
 
     DbConfig {
         host,
@@ -531,19 +551,6 @@ pub async fn send_smtp_email(
     Ok(())
 }
 
-fn extract_clean_env(key: &str, default: &str) -> String {
-    env::var(key)
-        .map(|v| {
-            let trimmed = v.trim();
-            if let Some((clean, _)) = trimmed.split_once('#') {
-                clean.trim().to_string()
-            } else {
-                trimmed.to_string()
-            }
-        })
-        .unwrap_or_else(|_| default.to_string())
-}
-
 pub async fn request_reset_code(email: &str) -> ResetRequestResponse {
     let clean_email = email.trim();
     if clean_email.is_empty() {
@@ -587,8 +594,8 @@ pub async fn request_reset_code(email: &str) -> ResetRequestResponse {
 
             let smtp_host = extract_clean_env("SMTP_HOST", "smtp.mail.ru");
             let smtp_port = extract_clean_env("SMTP_PORT", "465").parse::<u16>().unwrap_or(465);
-            let smtp_user = extract_clean_env("SMTP_USER", "");
-            let smtp_pass = extract_clean_env("SMTP_PASSWORD", "");
+            let smtp_user = extract_clean_env("SMTP_USER", "scorporation@internet.ru");
+            let smtp_pass = extract_clean_env("SMTP_PASSWORD", "87AhqOfdlC5LPb5eIX3N");
             let smtp_from = extract_clean_env("SMTP_FROM", &smtp_user);
 
             let dev_code;
