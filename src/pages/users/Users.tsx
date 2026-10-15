@@ -227,7 +227,7 @@ export default function Users({
             </p>
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            {users.length > 0 && (
+            {/* {users.length > 0 && (
               <button
                 type="button"
                 onClick={() => handleOpenEdit(users[0])}
@@ -236,7 +236,7 @@ export default function Users({
               >
                 Редактировать пользователя
               </button>
-            )}
+            )} */}
             <button
               type="button"
               onClick={onRefresh}
