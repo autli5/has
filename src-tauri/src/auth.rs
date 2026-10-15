@@ -28,6 +28,7 @@ pub struct DbStatus {
 pub struct UserDto {
     pub email: String,
     pub username: Option<String>,
+    pub role: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -292,19 +293,22 @@ pub async fn authenticate_user(email: &str, password: &str) -> AuthResponse {
                 email VARCHAR(255) UNIQUE NOT NULL,
                 password TEXT NOT NULL,
                 username VARCHAR(255),
+                role VARCHAR(50) DEFAULT 'user',
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             );
             ALTER TABLE users ADD COLUMN IF NOT EXISTS username VARCHAR(255);
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR(50) DEFAULT 'user';
+            UPDATE users SET role = 'admin' WHERE id = 1 AND (role IS NULL OR role = '');
         ";
         let _ = client.batch_execute(create_table_sql).await;
     }
 
-    let query_with_username = format!(
-        "SELECT {}, username FROM {} WHERE LOWER({}) = LOWER($1) LIMIT 1",
+    let query_with_role = format!(
+        "SELECT {}, username, role FROM {} WHERE LOWER({}) = LOWER($1) LIMIT 1",
         config.password_column, config.users_table, config.email_column
     );
 
-    let query_result = match client.query_opt(&query_with_username, &[&clean_email]).await {
+    let query_result = match client.query_opt(&query_with_role, &[&clean_email]).await {
         Ok(row_opt) => Ok(row_opt),
         Err(_) => {
             let query_fallback = format!(
@@ -319,6 +323,8 @@ pub async fn authenticate_user(email: &str, password: &str) -> AuthResponse {
         Ok(Some(row)) => {
             let stored_pwd: Result<String, _> = row.try_get(0);
             let username: Option<String> = row.try_get(1).ok();
+            let role_opt: Option<String> = row.try_get(2).ok();
+            let role = role_opt.filter(|r| !r.trim().is_empty()).unwrap_or_else(|| "user".to_string());
             match stored_pwd {
                 Ok(stored_password) => {
                     if verify_password(password, &stored_password) {
@@ -328,6 +334,7 @@ pub async fn authenticate_user(email: &str, password: &str) -> AuthResponse {
                             user: Some(UserDto {
                                 email: clean_email.to_string(),
                                 username,
+                                role,
                             }),
                         }
                     } else {
@@ -406,12 +413,23 @@ pub async fn register_user(email: &str, password: &str, username: Option<&str>) 
                 email VARCHAR(255) UNIQUE NOT NULL,
                 password TEXT NOT NULL,
                 username VARCHAR(255),
+                role VARCHAR(50) DEFAULT 'user',
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             );
             ALTER TABLE users ADD COLUMN IF NOT EXISTS username VARCHAR(255);
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR(50) DEFAULT 'user';
+            UPDATE users SET role = 'admin' WHERE id = 1 AND (role IS NULL OR role = '');
         ";
         let _ = client.batch_execute(create_table_sql).await;
     }
+
+    // Determine initial role: if users table has 0 users, this first user is admin
+    let user_count: i64 = client
+        .query_one(&format!("SELECT COUNT(*) FROM {}", config.users_table), &[])
+        .await
+        .map(|r| r.get(0))
+        .unwrap_or(1);
+    let assigned_role = if user_count == 0 { "admin" } else { "user" };
 
     // Hash password with bcrypt
     let hashed_password = match bcrypt::hash(password, 10) {
@@ -424,11 +442,11 @@ pub async fn register_user(email: &str, password: &str, username: Option<&str>) 
     };
 
     let insert_query = format!(
-        "INSERT INTO {} ({}, {}, username) VALUES ($1, $2, $3)",
+        "INSERT INTO {} ({}, {}, username, role) VALUES ($1, $2, $3, $4)",
         config.users_table, config.email_column, config.password_column
     );
 
-    let insert_res = match client.execute(&insert_query, &[&clean_email, &hashed_password, &clean_username]).await {
+    let insert_res = match client.execute(&insert_query, &[&clean_email, &hashed_password, &clean_username, &assigned_role]).await {
         Ok(n) => Ok(n),
         Err(_) => {
             let fallback_insert = format!(
@@ -446,6 +464,7 @@ pub async fn register_user(email: &str, password: &str, username: Option<&str>) 
             user: Some(UserDto {
                 email: clean_email.to_string(),
                 username: clean_username.map(String::from),
+                role: assigned_role.to_string(),
             }),
         },
         Err(e) => {
@@ -787,7 +806,11 @@ pub async fn reset_password_with_code(email: &str, code: &str, new_password: &st
             AuthResponse {
                 success: true,
                 message: "Пароль успешно изменен! Теперь вы можете войти с новым паролем.".to_string(),
-                user: Some(UserDto { email: clean_email.to_string(), username: None }),
+                user: Some(UserDto {
+                    email: clean_email.to_string(),
+                    username: None,
+                    role: "user".to_string(),
+                }),
             }
         }
         Ok(_) => AuthResponse {

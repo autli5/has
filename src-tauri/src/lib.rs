@@ -1,6 +1,8 @@
+mod admin;
 mod auth;
 mod storage;
 
+use admin::DeviceSecurityInfo;
 use auth::{AuthResponse, DbStatus, ResetRequestResponse};
 use serde::Serialize;
 use storage::{ServerUserDto, StorageItemDto, StorageStats};
@@ -102,6 +104,39 @@ async fn list_server_users() -> Result<Vec<ServerUserDto>, String> {
     storage::list_server_users().await
 }
 
+// Admin security & user management commands
+#[tauri::command]
+async fn get_admin_security_info(admin_email: String) -> Result<DeviceSecurityInfo, String> {
+    admin::get_admin_security_info(&admin_email).await
+}
+
+#[tauri::command]
+async fn update_admin_security_policy(
+    admin_email: String,
+    device_binding: bool,
+    trusted_device: Option<String>,
+    ip_binding: bool,
+    trusted_ip: Option<String>,
+) -> Result<DeviceSecurityInfo, String> {
+    admin::update_admin_security_policy(&admin_email, device_binding, trusted_device, ip_binding, trusted_ip).await
+}
+
+#[tauri::command]
+async fn admin_update_user(
+    admin_email: String,
+    target_id: i32,
+    new_username: Option<String>,
+    new_email: Option<String>,
+    new_role: Option<String>,
+) -> Result<String, String> {
+    admin::admin_update_user(&admin_email, target_id, new_username, new_email, new_role).await
+}
+
+#[tauri::command]
+async fn admin_delete_user(admin_email: String, target_id: i32) -> Result<String, String> {
+    admin::admin_delete_user(&admin_email, target_id).await
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     auth::load_env();
@@ -124,9 +159,12 @@ pub fn run() {
             delete_server_item,
             rename_server_item,
             upload_server_file,
-            list_server_users
+            list_server_users,
+            get_admin_security_info,
+            update_admin_security_policy,
+            admin_update_user,
+            admin_delete_user
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
-

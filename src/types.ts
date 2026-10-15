@@ -1,6 +1,7 @@
 export interface UserDto {
   email: string;
   username?: string | null;
+  role?: string;
 }
 
 export interface AuthResponse {
@@ -60,3 +61,15 @@ export interface ServerUserDto {
   created_at: string;
 }
 
+export interface DeviceSecurityInfo {
+  current_device_name: string;
+  current_ip: string;
+  is_admin: boolean;
+  device_binding_enabled: boolean;
+  trusted_device_name?: string | null;
+  ip_binding_enabled: boolean;
+  trusted_ip?: string | null;
+  is_device_allowed: boolean;
+  is_ip_allowed: boolean;
+  can_admin_manage: boolean;
+}

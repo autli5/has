@@ -1,4 +1,6 @@
-import type { UserDto, ServerUserDto } from "../../types";
+import { useState, useEffect, useCallback } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import type { UserDto, ServerUserDto, DeviceSecurityInfo } from "../../types";
 import "./Users.css";
 
 interface UsersProps {
@@ -14,8 +16,177 @@ export default function Users({
   isLoading,
   onRefresh,
 }: UsersProps) {
+  const [securityInfo, setSecurityInfo] = useState<DeviceSecurityInfo | null>(null);
+  const [, setLoadingSecurity] = useState(false);
+  const [securityMessage, setSecurityMessage] = useState<string | null>(null);
+
+  // Edit user modal state
+  const [editingUser, setEditingUser] = useState<ServerUserDto | null>(null);
+  const [editUsername, setEditUsername] = useState("");
+  const [editEmail, setEditEmail] = useState("");
+  const [editRole, setEditRole] = useState("user");
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+
+  // Security policy modal state
+  const [showSecurityModal, setShowSecurityModal] = useState(false);
+  const [deviceBinding, setDeviceBinding] = useState(false);
+  const [trustedDevice, setTrustedDevice] = useState("");
+  const [ipBinding, setIpBinding] = useState(false);
+  const [trustedIp, setTrustedIp] = useState("");
+  const [savingPolicy, setSavingPolicy] = useState(false);
+
+  // Delete modal state
+  const [deletingUser, setDeletingUser] = useState<ServerUserDto | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+
+  const loadSecurityInfo = useCallback(async () => {
+    if (!isTauri) return;
+    setLoadingSecurity(true);
+    try {
+      const res = await invoke<DeviceSecurityInfo>("get_admin_security_info", {
+        adminEmail: currentUser.email,
+      });
+      setSecurityInfo(res);
+      setDeviceBinding(res.device_binding_enabled);
+      setTrustedDevice(res.trusted_device_name || res.current_device_name);
+      setIpBinding(res.ip_binding_enabled);
+      setTrustedIp(res.trusted_ip || res.current_ip);
+    } catch (err) {
+      console.error("Ошибка загрузки безопасности:", err);
+    } finally {
+      setLoadingSecurity(false);
+    }
+  }, [isTauri, currentUser.email]);
+
+  useEffect(() => {
+    loadSecurityInfo();
+  }, [loadSecurityInfo]);
+
+  // Handle Edit Click
+  const handleOpenEdit = (user: ServerUserDto) => {
+    setEditingUser(user);
+    setEditUsername(user.username || "");
+    setEditEmail(user.email);
+    setEditRole(user.role === "Администратор" ? "admin" : "user");
+    setEditError(null);
+  };
+
+  // Save User Edit
+  const handleSaveEdit = async () => {
+    if (!editingUser || !isTauri) return;
+    setSavingEdit(true);
+    setEditError(null);
+    try {
+      await invoke("admin_update_user", {
+        adminEmail: currentUser.email,
+        targetId: editingUser.id,
+        newUsername: editUsername.trim() || null,
+        newEmail: editEmail.trim(),
+        newRole: editRole,
+      });
+      setEditingUser(null);
+      onRefresh();
+    } catch (err) {
+      setEditError(String(err));
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  // Delete User
+  const handleDeleteConfirm = async () => {
+    if (!deletingUser || !isTauri) return;
+    setDeleting(true);
+    try {
+      await invoke("admin_delete_user", {
+        adminEmail: currentUser.email,
+        targetId: deletingUser.id,
+      });
+      setDeletingUser(null);
+      onRefresh();
+    } catch (err) {
+      alert(String(err));
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  // Save Security Policy
+  const handleSaveSecurityPolicy = async () => {
+    if (!isTauri) return;
+    setSavingPolicy(true);
+    setSecurityMessage(null);
+    try {
+      const updated = await invoke<DeviceSecurityInfo>("update_admin_security_policy", {
+        adminEmail: currentUser.email,
+        deviceBinding,
+        trustedDevice: deviceBinding ? trustedDevice.trim() : null,
+        ipBinding,
+        trustedIp: ipBinding ? trustedIp.trim() : null,
+      });
+      setSecurityInfo(updated);
+      setSecurityMessage("Политика безопасности успешно обновлена");
+      setTimeout(() => setShowSecurityModal(false), 800);
+    } catch (err) {
+      setSecurityMessage(String(err));
+    } finally {
+      setSavingPolicy(false);
+    }
+  };
+
+  const isAdmin = securityInfo?.is_admin || currentUser.role === "admin";
+  const canManage = securityInfo?.can_admin_manage ?? isAdmin;
+
   return (
     <div className="has-tab-content">
+      {/* ========================================================
+          SECURITY STATUS BAR
+          ======================================================== */}
+      <div className={`has-security-banner ${canManage ? "active" : "restricted"}`}>
+        <div className="has-sec-info">
+          <div className="has-sec-badge-row">
+            <span className={`has-role-pill ${isAdmin ? "admin" : "user"}`}>
+              {isAdmin ? "Роль: Главный Администратор" : "Роль: Пользователь"}
+            </span>
+            {securityInfo?.device_binding_enabled && (
+              <span className={`has-sec-tag ${securityInfo.is_device_allowed ? "ok" : "err"}`}>
+                Привязка к устройству: {securityInfo.is_device_allowed ? "Авторизовано" : "Блокировка"}
+              </span>
+            )}
+            {securityInfo?.ip_binding_enabled && (
+              <span className={`has-sec-tag ${securityInfo.is_ip_allowed ? "ok" : "err"}`}>
+                Привязка к IP: {securityInfo.is_ip_allowed ? "Разрешен" : "Запрещен"}
+              </span>
+            )}
+          </div>
+          <div className="has-sec-details">
+            <span>Устройство: <strong>{securityInfo?.current_device_name || "Определение..."}</strong></span>
+            <span>Сеть/IP: <strong>{securityInfo?.current_ip || "127.0.0.1"}</strong></span>
+          </div>
+          {!canManage && isAdmin && (
+            <div className="has-sec-warning">
+              Внимание: редактирование заблокировано, так как текущее устройство или IP-адрес не соответствуют доверенным параметрам безопасности.
+            </div>
+          )}
+        </div>
+
+        {isAdmin && (
+          <button
+            type="button"
+            className="has-sec-settings-btn"
+            onClick={() => setShowSecurityModal(true)}
+          >
+            Безопасность доступа
+          </button>
+        )}
+      </div>
+
+      {/* ========================================================
+          USERS TABLE PANEL
+          ======================================================== */}
       <div className="has-panel-card">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
           <div>
@@ -47,18 +218,19 @@ export default function Users({
                 <th>Роль</th>
                 <th>Дата регистрации</th>
                 <th>Статус</th>
+                {isAdmin && <th>Действия</th>}
               </tr>
             </thead>
             <tbody>
               {isLoading && users.length === 0 ? (
                 <tr>
-                  <td colSpan={6} style={{ textAlign: "center", padding: "24px", color: "#64748b" }}>
+                  <td colSpan={isAdmin ? 7 : 6} style={{ textAlign: "center", padding: "24px", color: "#64748b" }}>
                     Загрузка пользователей из базы данных...
                   </td>
                 </tr>
               ) : users.length === 0 ? (
                 <tr>
-                  <td colSpan={6} style={{ textAlign: "center", padding: "24px", color: "#64748b" }}>
+                  <td colSpan={isAdmin ? 7 : 6} style={{ textAlign: "center", padding: "24px", color: "#64748b" }}>
                     Пользователи в базе данных не найдены
                   </td>
                 </tr>
@@ -85,6 +257,32 @@ export default function Users({
                           <span className="has-badge-gray">Активен</span>
                         )}
                       </td>
+                      {isAdmin && (
+                        <td>
+                          <div className="has-action-buttons">
+                            <button
+                              type="button"
+                              className="has-btn-edit"
+                              onClick={() => handleOpenEdit(u)}
+                              disabled={!canManage}
+                              title={canManage ? "Редактировать данные" : "Доступ ограничен политикой безопасности"}
+                            >
+                              Изменить
+                            </button>
+                            {u.id !== 1 && !isCurrent && (
+                              <button
+                                type="button"
+                                className="has-btn-delete"
+                                onClick={() => setDeletingUser(u)}
+                                disabled={!canManage}
+                                title={canManage ? "Удалить пользователя" : "Доступ ограничен"}
+                              >
+                                Удалить
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      )}
                     </tr>
                   );
                 })
@@ -93,6 +291,213 @@ export default function Users({
           </table>
         </div>
       </div>
+
+      {/* ========================================================
+          EDIT USER MODAL
+          ======================================================== */}
+      {editingUser && (
+        <div className="has-modal-backdrop" onClick={() => setEditingUser(null)}>
+          <div className="has-modal-box" onClick={(e) => e.stopPropagation()}>
+            <h3 className="has-modal-title">Редактирование пользователя #{editingUser.id}</h3>
+            <p className="has-modal-subtitle">Изменение учетных данных и прав доступа</p>
+
+            {editError && <div className="has-modal-error">{editError}</div>}
+
+            <div className="has-modal-field">
+              <label>Имя пользователя (Никнейм)</label>
+              <input
+                type="text"
+                value={editUsername}
+                onChange={(e) => setEditUsername(e.target.value)}
+                placeholder="Введите имя..."
+              />
+            </div>
+
+            <div className="has-modal-field">
+              <label>Email учетной записи</label>
+              <input
+                type="email"
+                value={editEmail}
+                onChange={(e) => setEditEmail(e.target.value)}
+                placeholder="user@example.com"
+              />
+            </div>
+
+            <div className="has-modal-field">
+              <label>Роль в системе</label>
+              <select value={editRole} onChange={(e) => setEditRole(e.target.value)}>
+                <option value="user">Пользователь (Обычный доступ)</option>
+                <option value="admin">Администратор (Полные права)</option>
+              </select>
+            </div>
+
+            <div className="has-modal-actions">
+              <button
+                type="button"
+                className="has-modal-btn-cancel"
+                onClick={() => setEditingUser(null)}
+                disabled={savingEdit}
+              >
+                Отмена
+              </button>
+              <button
+                type="button"
+                className="has-modal-btn-save"
+                onClick={handleSaveEdit}
+                disabled={savingEdit}
+              >
+                {savingEdit ? "Сохранение..." : "Сохранить изменения"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================
+          SECURITY POLICY MODAL
+          ======================================================== */}
+      {showSecurityModal && (
+        <div className="has-modal-backdrop" onClick={() => setShowSecurityModal(false)}>
+          <div className="has-modal-box" onClick={(e) => e.stopPropagation()}>
+            <h3 className="has-modal-title">Безопасность панели администратора</h3>
+            <p className="has-modal-subtitle">
+              Ограничение прав редактирования по доверенному устройству и IP сети
+            </p>
+
+            {securityMessage && (
+              <div style={{ padding: "8px 12px", background: "#f0fdf4", color: "#166534", borderRadius: 8, fontSize: 13, marginBottom: 14 }}>
+                {securityMessage}
+              </div>
+            )}
+
+            <div className="has-sec-row-toggle">
+              <label className="has-sec-toggle-label">
+                <input
+                  type="checkbox"
+                  checked={deviceBinding}
+                  onChange={(e) => setDeviceBinding(e.target.checked)}
+                />
+                <div>
+                  <div style={{ fontWeight: 600 }}>Привязка к устройству</div>
+                  <div style={{ fontSize: 12, color: "#64748b" }}>
+                    Редактирование разрешено только с доверенного компьютера
+                  </div>
+                </div>
+              </label>
+            </div>
+
+            {deviceBinding && (
+              <div className="has-modal-field">
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                  <label style={{ margin: 0 }}>Имя доверенного устройства</label>
+                  <button
+                    type="button"
+                    className="has-link-btn"
+                    onClick={() => setTrustedDevice(securityInfo?.current_device_name || "")}
+                  >
+                    Вставить текущее ({securityInfo?.current_device_name})
+                  </button>
+                </div>
+                <input
+                  type="text"
+                  value={trustedDevice}
+                  onChange={(e) => setTrustedDevice(e.target.value)}
+                  placeholder="Имя ПК/хоста..."
+                />
+              </div>
+            )}
+
+            <div className="has-sec-row-toggle" style={{ marginTop: 14 }}>
+              <label className="has-sec-toggle-label">
+                <input
+                  type="checkbox"
+                  checked={ipBinding}
+                  onChange={(e) => setIpBinding(e.target.checked)}
+                />
+                <div>
+                  <div style={{ fontWeight: 600 }}>Привязка к IP-адресу сети</div>
+                  <div style={{ fontSize: 12, color: "#64748b" }}>
+                    Доступ к админ-панели только из доверенной подсети/IP
+                  </div>
+                </div>
+              </label>
+            </div>
+
+            {ipBinding && (
+              <div className="has-modal-field">
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                  <label style={{ margin: 0 }}>Доверенный IP адрес</label>
+                  <button
+                    type="button"
+                    className="has-link-btn"
+                    onClick={() => setTrustedIp(securityInfo?.current_ip || "")}
+                  >
+                    Вставить текущий ({securityInfo?.current_ip})
+                  </button>
+                </div>
+                <input
+                  type="text"
+                  value={trustedIp}
+                  onChange={(e) => setTrustedIp(e.target.value)}
+                  placeholder="Например: 192.168.1.100"
+                />
+              </div>
+            )}
+
+            <div className="has-modal-actions" style={{ marginTop: 24 }}>
+              <button
+                type="button"
+                className="has-modal-btn-cancel"
+                onClick={() => setShowSecurityModal(false)}
+                disabled={savingPolicy}
+              >
+                Закрыть
+              </button>
+              <button
+                type="button"
+                className="has-modal-btn-save"
+                onClick={handleSaveSecurityPolicy}
+                disabled={savingPolicy}
+              >
+                {savingPolicy ? "Сохранение..." : "Применить защиту"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================
+          CONFIRM DELETE MODAL
+          ======================================================== */}
+      {deletingUser && (
+        <div className="has-modal-backdrop" onClick={() => setDeletingUser(null)}>
+          <div className="has-modal-box" onClick={(e) => e.stopPropagation()}>
+            <h3 className="has-modal-title" style={{ color: "#dc2626" }}>Удаление пользователя</h3>
+            <p className="has-modal-subtitle">
+              Вы уверены, что хотите навсегда удалить пользователя <strong>{deletingUser.email}</strong>? Это действие нельзя отменить.
+            </p>
+
+            <div className="has-modal-actions" style={{ marginTop: 20 }}>
+              <button
+                type="button"
+                className="has-modal-btn-cancel"
+                onClick={() => setDeletingUser(null)}
+                disabled={deleting}
+              >
+                Отмена
+              </button>
+              <button
+                type="button"
+                className="has-modal-btn-delete"
+                onClick={handleDeleteConfirm}
+                disabled={deleting}
+              >
+                {deleting ? "Удаление..." : "Удалить"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

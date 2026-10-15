@@ -487,7 +487,7 @@ pub async fn list_server_users() -> Result<Vec<ServerUserDto>, String> {
     let client = connect_to_db(&config).await?;
 
     let query = format!(
-        "SELECT id, {}, username, created_at FROM {} ORDER BY id ASC;",
+        "SELECT id, {}, username, created_at, role FROM {} ORDER BY id ASC;",
         config.email_column, config.users_table
     );
 
@@ -502,6 +502,11 @@ pub async fn list_server_users() -> Result<Vec<ServerUserDto>, String> {
         let email: String = row.get(1);
         let username: Option<String> = row.get(2);
         let created_at: Option<chrono::NaiveDateTime> = row.get(3);
+        let role_val: Option<String> = row.try_get(4).ok().flatten();
+        let role_str = match role_val.as_deref() {
+            Some("admin") | Some("Администратор") => "Администратор".to_string(),
+            _ => if id == 1 { "Администратор".to_string() } else { "Пользователь".to_string() },
+        };
         let created_str = created_at
             .map(|dt| dt.format("%d.%m.%Y %H:%M").to_string())
             .unwrap_or_else(|| "Активен".to_string());
@@ -510,7 +515,7 @@ pub async fn list_server_users() -> Result<Vec<ServerUserDto>, String> {
             id,
             email,
             username,
-            role: if id == 1 { "Администратор".to_string() } else { "Пользователь".to_string() },
+            role: role_str,
             created_at: created_str,
         });
     }
