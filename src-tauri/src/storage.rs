@@ -95,9 +95,148 @@ pub async fn init_storage_tables() -> Result<(), String> {
         .await
         .map_err(|e| format!("Failed to initialize storage tables: {}", e))?;
 
+    // Make sure base storage directory exists on the server
+    let base_path = env::var("SERVER_STORAGE_PATH")
+        .unwrap_or_else(|_| "/www/server/pgsql/storage".to_string());
+    fs_ensure_dir(&client, &base_path).await;
+
+    // Sync all existing folders in database to physical disk
+    if let Ok(rows) = client.query("SELECT id, user_email FROM server_folders;", &[]).await {
+        for row in rows {
+            let fid: i64 = row.get(0);
+            let email: String = row.get(1);
+            let full_path = resolve_folder_full_path(&client, &email, Some(fid)).await;
+            fs_ensure_dir(&client, &full_path).await;
+        }
+    }
+
     Ok(())
 }
 
+pub async fn resolve_user_folder_name(client: &tokio_postgres::Client, user_email: &str) -> String {
+    if let Ok(Some(row)) = client
+        .query_opt("SELECT username FROM users WHERE email = $1;", &[&user_email])
+        .await
+    {
+        if let Some(uname) = row.try_get::<_, String>(0).ok() {
+            let trimmed = uname.trim();
+            if !trimmed.is_empty() {
+                return trimmed.to_lowercase();
+            }
+        }
+    }
+    let fallback = user_email.split('@').next().unwrap_or(user_email);
+    fallback.to_lowercase()
+}
+
+pub async fn resolve_folder_full_path(
+    client: &tokio_postgres::Client,
+    user_email: &str,
+    folder_id: Option<i64>,
+) -> String {
+    let base_dir = env::var("SERVER_STORAGE_PATH")
+        .unwrap_or_else(|_| "/www/server/pgsql/storage".to_string());
+    let user_dir = resolve_user_folder_name(client, user_email).await;
+
+    let mut full_path = format!("{}/{}", base_dir, user_dir);
+
+    if let Some(fid) = folder_id {
+        let query = "
+            WITH RECURSIVE folder_path AS (
+                SELECT id, name, parent_id, 1 as depth
+                FROM server_folders
+                WHERE id = $1 AND user_email = $2
+                UNION ALL
+                SELECT f.id, f.name, f.parent_id, fp.depth + 1
+                FROM server_folders f
+                JOIN folder_path fp ON f.id = fp.parent_id
+                WHERE f.user_email = $2
+            )
+            SELECT name FROM folder_path ORDER BY depth DESC;
+        ";
+        if let Ok(rows) = client.query(query, &[&fid, &user_email]).await {
+            for row in rows {
+                let name: String = row.get(0);
+                full_path.push('/');
+                full_path.push_str(&name);
+            }
+        }
+    }
+
+    full_path
+}
+
+pub async fn fs_ensure_dir(client: &tokio_postgres::Client, full_path: &str) {
+    use base64::Engine;
+    let b64_path = base64::engine::general_purpose::STANDARD.encode(full_path.as_bytes());
+    let cmd = format!(
+        "COPY (SELECT 1) TO PROGRAM 'python3 -c \"import os, base64; p = base64.b64decode(\\\"{}\\\").decode(\\\"utf-8\\\"); os.makedirs(p, exist_ok=True)\" 2>/dev/null || true';",
+        b64_path
+    );
+    let _ = client.batch_execute(&cmd).await;
+}
+
+pub async fn fs_save_file(
+    client: &tokio_postgres::Client,
+    file_id: i64,
+    dir_path: &str,
+    file_name: &str,
+) -> Result<String, String> {
+    use base64::Engine;
+    fs_ensure_dir(client, dir_path).await;
+
+    let full_file_path = format!("{}/{}", dir_path, file_name);
+    let b64_filepath = base64::engine::general_purpose::STANDARD.encode(full_file_path.as_bytes());
+
+    let write_cmd = format!(
+        "COPY (SELECT encode(content, 'base64') FROM server_files WHERE id = {}) TO PROGRAM 'python3 -c \"import sys, base64; p = base64.b64decode(\\\"{}\\\").decode(\\\"utf-8\\\"); raw = sys.stdin.read().strip(); data = base64.b64decode(raw) if raw else b\\\"\\\"; open(p, \\\"wb\\\").write(data)\" 2>/dev/null || true';",
+        file_id, b64_filepath
+    );
+
+    let _ = client.batch_execute(&write_cmd).await;
+
+    let _ = client
+        .execute(
+            "UPDATE server_files SET file_path = $1 WHERE id = $2;",
+            &[&full_file_path, &file_id],
+        )
+        .await;
+
+    Ok(full_file_path)
+}
+
+pub async fn fs_delete_dir(client: &tokio_postgres::Client, dir_path: &str) {
+    use base64::Engine;
+    let b64_dir = base64::engine::general_purpose::STANDARD.encode(dir_path.as_bytes());
+    let rmdir_cmd = format!(
+        "COPY (SELECT 1) TO PROGRAM 'python3 -c \"import shutil, base64; p = base64.b64decode(\\\"{}\\\").decode(\\\"utf-8\\\"); shutil.rmtree(p, ignore_errors=True)\" 2>/dev/null || true';",
+        b64_dir
+    );
+    let _ = client.batch_execute(&rmdir_cmd).await;
+}
+
+pub async fn fs_delete_file(client: &tokio_postgres::Client, file_path: &str) {
+    use base64::Engine;
+    let b64_fpath = base64::engine::general_purpose::STANDARD.encode(file_path.as_bytes());
+    let rm_cmd = format!(
+        "COPY (SELECT 1) TO PROGRAM 'python3 -c \"import os, base64; p = base64.b64decode(\\\"{}\\\").decode(\\\"utf-8\\\"); os.remove(p) if os.path.exists(p) else None\" 2>/dev/null || true';",
+        b64_fpath
+    );
+    let _ = client.batch_execute(&rm_cmd).await;
+}
+
+pub async fn fs_rename_path(client: &tokio_postgres::Client, old_path: &str, new_path: &str) {
+    use base64::Engine;
+    let b64_old = base64::engine::general_purpose::STANDARD.encode(old_path.as_bytes());
+    let b64_new = base64::engine::general_purpose::STANDARD.encode(new_path.as_bytes());
+    let mv_cmd = format!(
+        "COPY (SELECT 1) TO PROGRAM 'python3 -c \"import os, base64; old = base64.b64decode(\\\"{}\\\").decode(\\\"utf-8\\\"); new = base64.b64decode(\\\"{}\\\").decode(\\\"utf-8\\\"); os.rename(old, new) if os.path.exists(old) else None\" 2>/dev/null || true';",
+        b64_old, b64_new
+    );
+    let _ = client.batch_execute(&mv_cmd).await;
+}
+
+#[allow(dead_code)]
 fn sanitize_path_segment(input: &str) -> String {
     input
         .chars()
@@ -362,6 +501,10 @@ pub async fn create_server_folder(user_email: &str, folder_name: &str, parent_id
         .map(|dt| dt.format("%d.%m.%Y %H:%M").to_string())
         .unwrap_or_else(|| "—".to_string());
 
+    // Create directory on physical Linux filesystem on the server
+    let full_path = resolve_folder_full_path(&client, user_email, Some(folder_id)).await;
+    fs_ensure_dir(&client, &full_path).await;
+
     Ok(StorageItemDto {
         id: format!("folder_{}", folder_id),
         name: clean_name.to_string(),
@@ -380,26 +523,9 @@ pub async fn delete_server_item(user_email: &str, item_id: &str) -> Result<bool,
 
     if let Some(id_str) = item_id.strip_prefix("folder_") {
         if let Ok(id) = id_str.parse::<i64>() {
-            // Get folder name for filesystem deletion
-            if let Ok(Some(row)) = client
-                .query_opt(
-                    "SELECT name FROM server_folders WHERE id = $1 AND user_email = $2;",
-                    &[&id, &user_email],
-                )
-                .await
-            {
-                let name: String = row.get(0);
-                let base_path = env::var("SERVER_STORAGE_PATH")
-                    .unwrap_or_else(|_| "/www/server/pgsql/storage".to_string());
-                let safe_user = sanitize_path_segment(user_email);
-                let safe_folder = sanitize_path_segment(&name);
-
-                let rmdir_cmd = format!(
-                    "COPY (SELECT 1) TO PROGRAM 'rm -rf \"{}/{}/{}\" 2>/dev/null || true';",
-                    base_path, safe_user, safe_folder
-                );
-                let _ = client.batch_execute(&rmdir_cmd).await;
-            }
+            // Delete directory on physical Linux filesystem
+            let folder_path = resolve_folder_full_path(&client, user_email, Some(id)).await;
+            fs_delete_dir(&client, &folder_path).await;
 
             client
                 .execute(
@@ -413,6 +539,19 @@ pub async fn delete_server_item(user_email: &str, item_id: &str) -> Result<bool,
         }
     } else if let Some(id_str) = item_id.strip_prefix("file_") {
         if let Ok(id) = id_str.parse::<i64>() {
+            // Delete file on physical Linux filesystem
+            if let Ok(Some(row)) = client
+                .query_opt(
+                    "SELECT file_path FROM server_files WHERE id = $1 AND user_email = $2;",
+                    &[&id, &user_email],
+                )
+                .await
+            {
+                if let Some(fpath) = row.try_get::<_, String>(0).ok() {
+                    fs_delete_file(&client, &fpath).await;
+                }
+            }
+
             client
                 .execute(
                     "DELETE FROM server_files WHERE id = $1 AND user_email = $2;",
@@ -439,6 +578,8 @@ pub async fn rename_server_item(user_email: &str, item_id: &str, new_name: &str)
 
     if let Some(id_str) = item_id.strip_prefix("folder_") {
         if let Ok(id) = id_str.parse::<i64>() {
+            let old_path = resolve_folder_full_path(&client, user_email, Some(id)).await;
+
             client
                 .execute(
                     "UPDATE server_folders SET name = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND user_email = $3;",
@@ -447,19 +588,39 @@ pub async fn rename_server_item(user_email: &str, item_id: &str, new_name: &str)
                 .await
                 .map_err(|e| format!("Ошибка переименования папки: {}", e))?;
 
+            let new_path = resolve_folder_full_path(&client, user_email, Some(id)).await;
+            fs_rename_path(&client, &old_path, &new_path).await;
+
             return Ok(true);
         }
     } else if let Some(id_str) = item_id.strip_prefix("file_") {
         if let Ok(id) = id_str.parse::<i64>() {
-            client
-                .execute(
-                    "UPDATE server_files SET name = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND user_email = $3;",
-                    &[&clean_name, &id, &user_email],
+            if let Ok(Some(row)) = client
+                .query_opt(
+                    "SELECT file_path, folder_id FROM server_files WHERE id = $1 AND user_email = $2;",
+                    &[&id, &user_email],
                 )
                 .await
-                .map_err(|e| format!("Ошибка переименования файла: {}", e))?;
+            {
+                let old_path: Option<String> = row.try_get(0).ok();
+                let f_id: Option<i64> = row.try_get(1).ok();
+                let dir_path = resolve_folder_full_path(&client, user_email, f_id).await;
+                let new_path = format!("{}/{}", dir_path, clean_name);
 
-            return Ok(true);
+                client
+                    .execute(
+                        "UPDATE server_files SET name = $1, file_path = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3 AND user_email = $4;",
+                        &[&clean_name, &new_path, &id, &user_email],
+                    )
+                    .await
+                    .map_err(|e| format!("Ошибка переименования файла: {}", e))?;
+
+                if let Some(old) = old_path {
+                    fs_rename_path(&client, &old, &new_path).await;
+                }
+
+                return Ok(true);
+            }
         }
     }
 
@@ -515,6 +676,10 @@ pub async fn upload_server_file(
     let date_str = created_at
         .map(|dt| dt.format("%d.%m.%Y %H:%M").to_string())
         .unwrap_or_else(|| "—".to_string());
+
+    // Save file to physical Linux filesystem on the server
+    let dir_path = resolve_folder_full_path(&client, user_email, folder_id).await;
+    let _ = fs_save_file(&client, file_id, &dir_path, clean_name).await;
 
     Ok(StorageItemDto {
         id: format!("file_{}", file_id),
