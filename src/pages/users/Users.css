@@ -27,3 +27,35 @@
   border-bottom: 1px solid #f1f5f9;
   color: #0f172a;
 }
+
+.has-refresh-btn {
+  padding: 6px 14px;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.has-refresh-btn:hover:not(:disabled) {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+}
+
+.has-refresh-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.has-badge-admin {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: #fdf2f8;
+  color: #db2777;
+  font-size: 12px;
+  font-weight: 600;
+}

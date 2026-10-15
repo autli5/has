@@ -26,7 +26,9 @@ pub struct StorageItemDto {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ServerUserDto {
+    pub id: i32,
     pub email: String,
+    pub username: Option<String>,
     pub role: String,
     pub created_at: String,
 }
@@ -485,8 +487,8 @@ pub async fn list_server_users() -> Result<Vec<ServerUserDto>, String> {
     let client = connect_to_db(&config).await?;
 
     let query = format!(
-        "SELECT {} FROM {} ORDER BY {} ASC;",
-        config.email_column, config.users_table, config.email_column
+        "SELECT id, {}, username, created_at FROM {} ORDER BY id ASC;",
+        config.email_column, config.users_table
     );
 
     let rows = client
@@ -496,11 +498,20 @@ pub async fn list_server_users() -> Result<Vec<ServerUserDto>, String> {
 
     let mut users = Vec::new();
     for row in rows {
-        let email: String = row.get(0);
+        let id: i32 = row.get(0);
+        let email: String = row.get(1);
+        let username: Option<String> = row.get(2);
+        let created_at: Option<chrono::NaiveDateTime> = row.get(3);
+        let created_str = created_at
+            .map(|dt| dt.format("%d.%m.%Y %H:%M").to_string())
+            .unwrap_or_else(|| "Активен".to_string());
+
         users.push(ServerUserDto {
+            id,
             email,
-            role: "Пользователь".to_string(),
-            created_at: "Активен".to_string(),
+            username,
+            role: if id == 1 { "Администратор".to_string() } else { "Пользователь".to_string() },
+            created_at: created_str,
         });
     }
 

@@ -1,5 +1,6 @@
-import { useState } from "react";
-import type { UserDto, DbStatus, SafeDbInfo } from "../../types";
+import { useState, useEffect, useCallback } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import type { UserDto, DbStatus, SafeDbInfo, ServerUserDto } from "../../types";
 import logoUrl from "../../assets/logo.png";
 import {
   HomeNavIcon,
@@ -36,8 +37,31 @@ export default function Dashboard({
 }: DashboardProps) {
   const [activeTab, setActiveTab] = useState<NavTab>("home");
   const [searchQuery, setSearchQuery] = useState("");
+  const [serverUsers, setServerUsers] = useState<ServerUserDto[]>([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
 
   const displayName = user.username?.trim() || user.email.split("@")[0];
+
+  const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+
+  const loadServerUsers = useCallback(async () => {
+    if (!isTauri) return;
+    setLoadingUsers(true);
+    try {
+      const res = await invoke<ServerUserDto[]>("list_server_users");
+      if (Array.isArray(res)) {
+        setServerUsers(res);
+      }
+    } catch (err) {
+      console.error("Ошибка загрузки пользователей:", err);
+    } finally {
+      setLoadingUsers(false);
+    }
+  }, [isTauri]);
+
+  useEffect(() => {
+    loadServerUsers();
+  }, [loadServerUsers]);
 
   return (
     <div className="has-dashboard-wrapper">
@@ -76,7 +100,6 @@ export default function Dashboard({
               <HomeNavIcon className="w-5 h-5" width={20} height={20} />
               <span>Home</span>
             </div>
-            <span className="has-nav-badge home-badge">10</span>
           </button>
 
           <button
@@ -99,7 +122,9 @@ export default function Dashboard({
               <UsersNavIcon className="w-5 h-5" width={20} height={20} />
               <span>Users</span>
             </div>
-            <span className="has-nav-badge users-badge">2</span>
+            {serverUsers.length > 0 && (
+              <span className="has-nav-badge users-badge">{serverUsers.length}</span>
+            )}
           </button>
 
           <button
@@ -192,13 +217,19 @@ export default function Dashboard({
               displayName={displayName}
               dbInfo={dbInfo}
               dbStatus={dbStatus}
+              usersCount={serverUsers.length}
             />
           )}
 
           {activeTab === "tasks" && <Tasks />}
 
           {activeTab === "users" && (
-            <Users user={user} displayName={displayName} />
+            <Users
+              currentUser={user}
+              users={serverUsers}
+              isLoading={loadingUsers}
+              onRefresh={loadServerUsers}
+            />
           )}
 
           {activeTab === "apis" && <Apis dbInfo={dbInfo} />}

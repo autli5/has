@@ -12,6 +12,7 @@ interface HomeProps {
   displayName: string;
   dbInfo: SafeDbInfo | null;
   dbStatus: DbStatus | null;
+  usersCount: number;
 }
 
 export default function Home({
@@ -19,6 +20,7 @@ export default function Home({
   displayName,
   dbInfo,
   dbStatus,
+  usersCount,
 }: HomeProps) {
   return (
     <div className="has-tab-content">
@@ -63,9 +65,11 @@ export default function Home({
             <TasksNavIcon className="w-5 h-5" width={20} height={20} />
           </div>
           <div>
-            <div className="has-stat-label">Активные задачи</div>
-            <div className="has-stat-value">10</div>
-            <div className="has-stat-hint">Все процессы в норме</div>
+            <div className="has-stat-label">Службы сервера</div>
+            <div className="has-stat-value" style={{ color: dbStatus?.connected ? "#059669" : "#64748b" }}>
+              {dbStatus?.connected ? "Активны" : "Ожидание"}
+            </div>
+            <div className="has-stat-hint">PostgreSQL, Auth, Mail</div>
           </div>
         </div>
 
@@ -75,7 +79,7 @@ export default function Home({
           </div>
           <div>
             <div className="has-stat-label">Пользователи</div>
-            <div className="has-stat-value">2</div>
+            <div className="has-stat-value">{usersCount}</div>
             <div className="has-stat-hint">Таблица {dbInfo?.users_table || "users"}</div>
           </div>
         </div>

@@ -53,7 +53,9 @@ export interface StorageItemDto {
 }
 
 export interface ServerUserDto {
+  id: number;
   email: string;
+  username?: string | null;
   role: string;
   created_at: string;
 }
