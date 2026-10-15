@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { UserDto, DbStatus, SafeDbInfo } from "../types";
+import logoUrl from "../assets/logo.png";
 import {
   HomeNavIcon,
   TasksNavIcon,
@@ -42,10 +43,8 @@ export default function Dashboard({
       <aside className="has-sidebar">
         {/* Brand Header */}
         <div className="has-sidebar-brand">
-          <div className="has-brand-logo">
-            <span>S</span>
-          </div>
-          <span className="has-brand-name">slothui</span>
+          <img src={logoUrl} alt="HAS Logo" className="has-brand-logo-img" />
+          <span className="has-brand-name">HAS</span>
         </div>
 
         {/* Search Input Bar */}

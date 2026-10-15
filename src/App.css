@@ -826,6 +826,14 @@ svg {
   padding-left: 4px;
 }
 
+.has-brand-logo-img {
+  width: 36px;
+  height: 36px;
+  object-fit: contain;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
 .has-brand-logo {
   width: 36px;
   height: 36px;
