@@ -12,6 +12,7 @@ import {
   CheckCircleIcon,
   SpinnerIcon,
   ChevronLeftIcon,
+  UserIcon,
 } from "./components/Icons";
 import { AuthResponse, DbStatus, ResetRequestResponse, SafeDbInfo, UserDto } from "./types";
 import { OtpInput } from "./components/OtpInput";
@@ -25,6 +26,7 @@ const isTauri = () => {
 
 export default function App() {
   const [mode, setMode] = useState<"login" | "register" | "reset">("login");
+  const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -167,6 +169,11 @@ export default function App() {
       return;
     }
 
+    if (!username.trim()) {
+      setError("Пожалуйста, укажите имя пользователя");
+      return;
+    }
+
     if (password !== confirmPassword) {
       setError("Пароли не совпадают");
       return;
@@ -182,6 +189,7 @@ export default function App() {
       const res = await invoke<AuthResponse>("register", {
         email: email.trim(),
         password,
+        username: username.trim(),
       });
 
       if (res.success) {
@@ -323,7 +331,19 @@ export default function App() {
     setError(null);
   };
 
-  // currentUser handled inside return below
+  if (currentUser) {
+    return (
+      <>
+        <UpdaterBanner />
+        <Dashboard
+          user={currentUser}
+          dbInfo={dbInfo}
+          dbStatus={dbStatus}
+          onLogout={handleLogout}
+        />
+      </>
+    );
+  }
 
   return (
     <div className="app-viewport">
@@ -339,6 +359,7 @@ export default function App() {
           title="Нажмите для просмотра параметров .env и статуса БД"
         >
           <span className="db-dot"></span>
+          <DatabaseIcon className="w-4 h-4" width={16} height={16} />
           <span>
             {dbStatus?.connected
               ? `PostgreSQL: ${dbStatus.host}`
@@ -348,14 +369,7 @@ export default function App() {
       </header>
 
       {/* Main Content Area */}
-      {currentUser ? (
-        <Dashboard
-          user={currentUser}
-          dbInfo={dbInfo}
-          dbStatus={dbStatus}
-          onLogout={handleLogout}
-        />
-      ) : mode === "reset" ? (
+      {mode === "reset" ? (
         /* Password Reset Flow */
         <main className="auth-main-container">
           <div className="auth-card">
@@ -638,6 +652,30 @@ export default function App() {
               className="auth-form"
               onSubmit={mode === "login" ? handleLogin : handleRegister}
             >
+              {/* Username (Register mode only) */}
+              {mode === "register" && (
+                <div className="form-group">
+                  <label className="form-label" htmlFor="username-input">
+                    Имя пользователя
+                  </label>
+                  <div className="input-container">
+                    <div className="input-icon-left">
+                      <UserIcon />
+                    </div>
+                    <input
+                      id="username-input"
+                      type="text"
+                      className="form-input"
+                      placeholder="Например: Иван Иванов"
+                      value={username}
+                      onChange={(e) => setUsername(e.target.value)}
+                      required
+                      autoComplete="name"
+                    />
+                  </div>
+                </div>
+              )}
+
               {/* Email Address */}
               <div className="form-group">
                 <label className="form-label" htmlFor="email-input">
@@ -756,6 +794,7 @@ export default function App() {
                 ) : (
                   <>
                     <span>{mode === "login" ? "Войти" : "Зарегистрироваться"}</span>
+                    <ArrowRightLoginIcon className="w-5 h-5" />
                   </>
                 )}
               </button>
@@ -770,6 +809,7 @@ export default function App() {
                         className="signup-link"
                         onClick={() => {
                           setMode("register");
+                          setUsername("");
                           setError(null);
                           setSuccess(null);
                         }}
@@ -784,6 +824,7 @@ export default function App() {
                         className="signup-link"
                         onClick={() => {
                           setMode("login");
+                          setUsername("");
                           setError(null);
                           setSuccess(null);
                         }}

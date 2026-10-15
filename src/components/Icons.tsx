@@ -1,6 +1,12 @@
-export function MailIcon({ className = "w-5 h-5" }: { className?: string }) {
+export interface IconProps {
+  className?: string;
+  width?: number | string;
+  height?: number | string;
+}
+
+export function MailIcon({ className = "w-5 h-5", width = 20, height = 20 }: IconProps) {
   return (
-    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <svg className={className} width={width} height={height} fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -11,9 +17,9 @@ export function MailIcon({ className = "w-5 h-5" }: { className?: string }) {
   );
 }
 
-export function LockIcon({ className = "w-5 h-5" }: { className?: string }) {
+export function LockIcon({ className = "w-5 h-5", width = 20, height = 20 }: IconProps) {
   return (
-    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <svg className={className} width={width} height={height} fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -24,9 +30,9 @@ export function LockIcon({ className = "w-5 h-5" }: { className?: string }) {
   );
 }
 
-export function EyeIcon({ className = "w-5 h-5" }: { className?: string }) {
+export function EyeIcon({ className = "w-5 h-5", width = 20, height = 20 }: IconProps) {
   return (
-    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <svg className={className} width={width} height={height} fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -43,9 +49,9 @@ export function EyeIcon({ className = "w-5 h-5" }: { className?: string }) {
   );
 }
 
-export function EyeOffIcon({ className = "w-5 h-5" }: { className?: string }) {
+export function EyeOffIcon({ className = "w-5 h-5", width = 20, height = 20 }: IconProps) {
   return (
-    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <svg className={className} width={width} height={height} fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -56,9 +62,9 @@ export function EyeOffIcon({ className = "w-5 h-5" }: { className?: string }) {
   );
 }
 
-export function ArrowRightLoginIcon({ className = "w-5 h-5" }: { className?: string }) {
+export function ArrowRightLoginIcon({ className = "w-5 h-5", width = 20, height = 20 }: IconProps) {
   return (
-    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <svg className={className} width={width} height={height} fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -70,9 +76,9 @@ export function ArrowRightLoginIcon({ className = "w-5 h-5" }: { className?: str
   );
 }
 
-export function DatabaseIcon({ className = "w-5 h-5" }: { className?: string }) {
+export function DatabaseIcon({ className = "w-5 h-5", width = 20, height = 20 }: IconProps) {
   return (
-    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <svg className={className} width={width} height={height} fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <ellipse cx="12" cy="5" rx="9" ry="3" strokeWidth={1.8} />
       <path strokeWidth={1.8} d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" />
       <path strokeWidth={1.8} d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
@@ -80,9 +86,9 @@ export function DatabaseIcon({ className = "w-5 h-5" }: { className?: string }) 
   );
 }
 
-export function AlertCircleIcon({ className = "w-5 h-5" }: { className?: string }) {
+export function AlertCircleIcon({ className = "w-5 h-5", width = 20, height = 20 }: IconProps) {
   return (
-    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <svg className={className} width={width} height={height} fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <circle cx="12" cy="12" r="10" strokeWidth={1.8} />
       <line x1="12" y1="8" x2="12" y2="12" strokeWidth={1.8} strokeLinecap="round" />
       <line x1="12" y1="16" x2="12.01" y2="16" strokeWidth={2.2} strokeLinecap="round" />
@@ -90,17 +96,17 @@ export function AlertCircleIcon({ className = "w-5 h-5" }: { className?: string 
   );
 }
 
-export function CheckCircleIcon({ className = "w-5 h-5" }: { className?: string }) {
+export function CheckCircleIcon({ className = "w-5 h-5", width = 20, height = 20 }: IconProps) {
   return (
-    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <svg className={className} width={width} height={height} fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
     </svg>
   );
 }
 
-export function SpinnerIcon({ className = "w-5 h-5" }: { className?: string }) {
+export function SpinnerIcon({ className = "w-5 h-5", width = 20, height = 20 }: IconProps) {
   return (
-    <svg className={`${className} animate-spin`} fill="none" viewBox="0 0 24 24">
+    <svg className={`${className} animate-spin`} width={width} height={height} fill="none" viewBox="0 0 24 24">
       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
       <path
         className="opacity-75"
@@ -111,17 +117,17 @@ export function SpinnerIcon({ className = "w-5 h-5" }: { className?: string }) {
   );
 }
 
-export function ChevronLeftIcon({ className = "w-4 h-4" }: { className?: string }) {
+export function ChevronLeftIcon({ className = "w-4 h-4", width = 16, height = 16 }: IconProps) {
   return (
-    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <svg className={className} width={width} height={height} fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
     </svg>
   );
 }
 
-export function KeyIcon({ className = "w-5 h-5" }: { className?: string }) {
+export function KeyIcon({ className = "w-5 h-5", width = 20, height = 20 }: IconProps) {
   return (
-    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <svg className={className} width={width} height={height} fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -132,9 +138,9 @@ export function KeyIcon({ className = "w-5 h-5" }: { className?: string }) {
   );
 }
 
-export function HomeNavIcon({ className = "w-5 h-5" }: { className?: string }) {
+export function HomeNavIcon({ className = "w-5 h-5", width = 20, height = 20 }: IconProps) {
   return (
-    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <svg className={className} width={width} height={height} fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -145,9 +151,9 @@ export function HomeNavIcon({ className = "w-5 h-5" }: { className?: string }) {
   );
 }
 
-export function TasksNavIcon({ className = "w-5 h-5" }: { className?: string }) {
+export function TasksNavIcon({ className = "w-5 h-5", width = 20, height = 20 }: IconProps) {
   return (
-    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <svg className={className} width={width} height={height} fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -158,9 +164,9 @@ export function TasksNavIcon({ className = "w-5 h-5" }: { className?: string }) 
   );
 }
 
-export function UsersNavIcon({ className = "w-5 h-5" }: { className?: string }) {
+export function UsersNavIcon({ className = "w-5 h-5", width = 20, height = 20 }: IconProps) {
   return (
-    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <svg className={className} width={width} height={height} fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -171,9 +177,9 @@ export function UsersNavIcon({ className = "w-5 h-5" }: { className?: string }) 
   );
 }
 
-export function ApiNavIcon({ className = "w-5 h-5" }: { className?: string }) {
+export function ApiNavIcon({ className = "w-5 h-5", width = 20, height = 20 }: IconProps) {
   return (
-    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <svg className={className} width={width} height={height} fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -184,9 +190,19 @@ export function ApiNavIcon({ className = "w-5 h-5" }: { className?: string }) {
   );
 }
 
-export function SettingsNavIcon({ className = "w-5 h-5" }: { className?: string }) {
+export function CreditCardIcon({ className = "w-5 h-5", width = 20, height = 20 }: IconProps) {
   return (
-    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <svg className={className} width={width} height={height} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <rect x="2" y="5" width="20" height="14" rx="2" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
+      <line x1="2" y1="10" x2="22" y2="10" strokeWidth={1.8} />
+      <line x1="6" y1="15" x2="10" y2="15" strokeWidth={1.8} strokeLinecap="round" />
+    </svg>
+  );
+}
+
+export function SettingsNavIcon({ className = "w-5 h-5", width = 20, height = 20 }: IconProps) {
+  return (
+    <svg className={className} width={width} height={height} fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -198,9 +214,9 @@ export function SettingsNavIcon({ className = "w-5 h-5" }: { className?: string 
   );
 }
 
-export function HelpNavIcon({ className = "w-5 h-5" }: { className?: string }) {
+export function HelpNavIcon({ className = "w-5 h-5", width = 20, height = 20 }: IconProps) {
   return (
-    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <svg className={className} width={width} height={height} fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -211,9 +227,9 @@ export function HelpNavIcon({ className = "w-5 h-5" }: { className?: string }) {
   );
 }
 
-export function LogOutIcon({ className = "w-5 h-5" }: { className?: string }) {
+export function LogOutIcon({ className = "w-5 h-5", width = 20, height = 20 }: IconProps) {
   return (
-    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <svg className={className} width={width} height={height} fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -224,9 +240,9 @@ export function LogOutIcon({ className = "w-5 h-5" }: { className?: string }) {
   );
 }
 
-export function SlidersIcon({ className = "w-5 h-5" }: { className?: string }) {
+export function SlidersIcon({ className = "w-5 h-5", width = 20, height = 20 }: IconProps) {
   return (
-    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <svg className={className} width={width} height={height} fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -237,9 +253,9 @@ export function SlidersIcon({ className = "w-5 h-5" }: { className?: string }) {
   );
 }
 
-export function UploadIcon({ className = "w-5 h-5" }: { className?: string }) {
+export function UploadIcon({ className = "w-5 h-5", width = 20, height = 20 }: IconProps) {
   return (
-    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <svg className={className} width={width} height={height} fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -250,9 +266,9 @@ export function UploadIcon({ className = "w-5 h-5" }: { className?: string }) {
   );
 }
 
-export function SearchIcon({ className = "w-5 h-5" }: { className?: string }) {
+export function SearchIcon({ className = "w-5 h-5", width = 20, height = 20 }: IconProps) {
   return (
-    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <svg className={className} width={width} height={height} fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -263,33 +279,33 @@ export function SearchIcon({ className = "w-5 h-5" }: { className?: string }) {
   );
 }
 
-export function ChevronRightIcon({ className = "w-4 h-4" }: { className?: string }) {
+export function ChevronRightIcon({ className = "w-4 h-4", width = 16, height = 16 }: IconProps) {
   return (
-    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <svg className={className} width={width} height={height} fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
     </svg>
   );
 }
 
-export function FolderIcon({ className = "w-5 h-5" }: { className?: string }) {
+export function FolderIcon({ className = "w-5 h-5", width = 20, height = 20 }: IconProps) {
   return (
-    <svg className={className} fill="currentColor" viewBox="0 0 24 24">
+    <svg className={className} width={width} height={height} fill="currentColor" viewBox="0 0 24 24">
       <path d="M19.5 21a3 3 0 003-3v-4.5a3 3 0 00-3-3h-1.5V9a3 3 0 00-3-3h-3.379a3 3 0 01-2.121-.879L8.379 4.043A3 3 0 006.257 3.164H4.5A3 3 0 001.5 6.164v11.836A3 3 0 004.5 21h15z" />
     </svg>
   );
 }
 
-export function SortArrowsIcon({ className = "w-3.5 h-3.5" }: { className?: string }) {
+export function SortArrowsIcon({ className = "w-3.5 h-3.5", width = 14, height = 14 }: IconProps) {
   return (
-    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <svg className={className} width={width} height={height} fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 4v12m0 0l4-4m-4 4l-4-4" />
     </svg>
   );
 }
 
-export function FolderPlusIcon({ className = "w-4 h-4" }: { className?: string }) {
+export function FolderPlusIcon({ className = "w-4 h-4", width = 16, height = 16 }: IconProps) {
   return (
-    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <svg className={className} width={width} height={height} fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -300,3 +316,15 @@ export function FolderPlusIcon({ className = "w-4 h-4" }: { className?: string }
   );
 }
 
+export function UserIcon({ className = "w-5 h-5", width = 20, height = 20 }: IconProps) {
+  return (
+    <svg className={className} width={width} height={height} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={1.8}
+        d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
+      />
+    </svg>
+  );
+}

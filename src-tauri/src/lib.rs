@@ -27,8 +27,8 @@ async fn login(email: String, password: String) -> Result<AuthResponse, String> 
 }
 
 #[tauri::command]
-async fn register(email: String, password: String) -> Result<AuthResponse, String> {
-    Ok(auth::register_user(&email, &password).await)
+async fn register(email: String, password: String, username: Option<String>) -> Result<AuthResponse, String> {
+    Ok(auth::register_user(&email, &password, username.as_deref()).await)
 }
 
 #[tauri::command]

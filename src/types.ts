@@ -1,5 +1,6 @@
 export interface UserDto {
   email: string;
+  username?: string | null;
 }
 
 export interface AuthResponse {

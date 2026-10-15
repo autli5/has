@@ -27,6 +27,7 @@ pub struct DbStatus {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserDto {
     pub email: String,
+    pub username: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -290,20 +291,34 @@ pub async fn authenticate_user(email: &str, password: &str) -> AuthResponse {
                 id SERIAL PRIMARY KEY,
                 email VARCHAR(255) UNIQUE NOT NULL,
                 password TEXT NOT NULL,
+                username VARCHAR(255),
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             );
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS username VARCHAR(255);
         ";
         let _ = client.batch_execute(create_table_sql).await;
     }
 
-    let query = format!(
-        "SELECT {} FROM {} WHERE LOWER({}) = LOWER($1) LIMIT 1",
+    let query_with_username = format!(
+        "SELECT {}, username FROM {} WHERE LOWER({}) = LOWER($1) LIMIT 1",
         config.password_column, config.users_table, config.email_column
     );
 
-    match client.query_opt(&query, &[&clean_email]).await {
+    let query_result = match client.query_opt(&query_with_username, &[&clean_email]).await {
+        Ok(row_opt) => Ok(row_opt),
+        Err(_) => {
+            let query_fallback = format!(
+                "SELECT {} FROM {} WHERE LOWER({}) = LOWER($1) LIMIT 1",
+                config.password_column, config.users_table, config.email_column
+            );
+            client.query_opt(&query_fallback, &[&clean_email]).await
+        }
+    };
+
+    match query_result {
         Ok(Some(row)) => {
             let stored_pwd: Result<String, _> = row.try_get(0);
+            let username: Option<String> = row.try_get(1).ok();
             match stored_pwd {
                 Ok(stored_password) => {
                     if verify_password(password, &stored_password) {
@@ -312,6 +327,7 @@ pub async fn authenticate_user(email: &str, password: &str) -> AuthResponse {
                             message: "Успешная авторизация".to_string(),
                             user: Some(UserDto {
                                 email: clean_email.to_string(),
+                                username,
                             }),
                         }
                     } else {
@@ -359,8 +375,9 @@ pub async fn authenticate_user(email: &str, password: &str) -> AuthResponse {
     }
 }
 
-pub async fn register_user(email: &str, password: &str) -> AuthResponse {
+pub async fn register_user(email: &str, password: &str, username: Option<&str>) -> AuthResponse {
     let clean_email = email.trim();
+    let clean_username = username.map(|u| u.trim()).filter(|u| !u.is_empty());
     if clean_email.is_empty() || password.is_empty() {
         return AuthResponse {
             success: false,
@@ -388,8 +405,10 @@ pub async fn register_user(email: &str, password: &str) -> AuthResponse {
                 id SERIAL PRIMARY KEY,
                 email VARCHAR(255) UNIQUE NOT NULL,
                 password TEXT NOT NULL,
+                username VARCHAR(255),
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             );
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS username VARCHAR(255);
         ";
         let _ = client.batch_execute(create_table_sql).await;
     }
@@ -405,16 +424,28 @@ pub async fn register_user(email: &str, password: &str) -> AuthResponse {
     };
 
     let insert_query = format!(
-        "INSERT INTO {} ({}, {}) VALUES ($1, $2)",
+        "INSERT INTO {} ({}, {}, username) VALUES ($1, $2, $3)",
         config.users_table, config.email_column, config.password_column
     );
 
-    match client.execute(&insert_query, &[&clean_email, &hashed_password]).await {
+    let insert_res = match client.execute(&insert_query, &[&clean_email, &hashed_password, &clean_username]).await {
+        Ok(n) => Ok(n),
+        Err(_) => {
+            let fallback_insert = format!(
+                "INSERT INTO {} ({}, {}) VALUES ($1, $2)",
+                config.users_table, config.email_column, config.password_column
+            );
+            client.execute(&fallback_insert, &[&clean_email, &hashed_password]).await
+        }
+    };
+
+    match insert_res {
         Ok(_) => AuthResponse {
             success: true,
             message: "Аккаунт успешно создан".to_string(),
             user: Some(UserDto {
                 email: clean_email.to_string(),
+                username: clean_username.map(String::from),
             }),
         },
         Err(e) => {
@@ -756,7 +787,7 @@ pub async fn reset_password_with_code(email: &str, code: &str, new_password: &st
             AuthResponse {
                 success: true,
                 message: "Пароль успешно изменен! Теперь вы можете войти с новым паролем.".to_string(),
-                user: Some(UserDto { email: clean_email.to_string() }),
+                user: Some(UserDto { email: clean_email.to_string(), username: None }),
             }
         }
         Ok(_) => AuthResponse {
