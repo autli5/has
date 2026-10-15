@@ -10,9 +10,14 @@ import {
   HelpNavIcon,
   SearchIcon,
   LogOutIcon,
-  CheckCircleIcon,
-  DatabaseIcon,
 } from "../components/Icons";
+import Home from "./Home";
+import Tasks from "./Tasks";
+import Users from "./Users";
+import Apis from "./Apis";
+import Settings from "./Settings";
+import Help from "./Help";
+import "./Dashboard.css";
 
 interface DashboardProps {
   user: UserDto;
@@ -108,7 +113,6 @@ export default function Dashboard({
             </div>
           </button>
 
-
           <button
             type="button"
             className={`has-nav-item ${activeTab === "settings" ? "active" : ""}`}
@@ -135,7 +139,7 @@ export default function Dashboard({
         {/* Spacer to push user info to the bottom */}
         <div className="has-sidebar-spacer" />
 
-        {/* User Card at Bottom: No avatar, No role, Prominent Name, and Logout */}
+        {/* User Card at Bottom */}
         <div className="has-user-card-bottom">
           <div className="has-user-meta">
             <span className="has-user-fullname" title={user.email}>
@@ -180,242 +184,28 @@ export default function Dashboard({
           </div>
         </header>
 
-        {/* Content Body */}
+        {/* Content Body Rendering Separate Page Components */}
         <div className="has-content-body">
           {activeTab === "home" && (
-            <div className="has-tab-content">
-              {/* Welcome Card */}
-              <div className="has-welcome-banner">
-                <div className="has-banner-text">
-                  <h2>Здравствуйте, {displayName}!</h2>
-                  <p>
-                    Добро пожаловать в панель управления Home Autli Server. Все системные службы работают в штатном режиме.
-                  </p>
-                </div>
-              </div>
-
-              {/* Server Stats Grid */}
-              <div className="has-stats-grid">
-                <div className="has-stat-box">
-                  <div className="has-stat-icon-wrap" style={{ background: "#eff6ff", color: "#3b82f6" }}>
-                    <DatabaseIcon className="w-5 h-5" width={20} height={20} />
-                  </div>
-                  <div>
-                    <div className="has-stat-label">База данных</div>
-                    <div className="has-stat-value">{dbInfo?.dbname || "has"}</div>
-                    <div className="has-stat-hint">{dbInfo?.host || "80.237.77.141"}:5432</div>
-                  </div>
-                </div>
-
-                <div className="has-stat-box">
-                  <div className="has-stat-icon-wrap" style={{ background: "#ecfdf5", color: "#10b981" }}>
-                    <CheckCircleIcon className="w-5 h-5" width={20} height={20} />
-                  </div>
-                  <div>
-                    <div className="has-stat-label">Статус сервера</div>
-                    <div className="has-stat-value" style={{ color: "#059669" }}>
-                      {dbStatus?.connected ? "Онлайн" : "Ожидание"}
-                    </div>
-                    <div className="has-stat-hint">SSL: {dbInfo?.ssl_mode || "prefer"}</div>
-                  </div>
-                </div>
-
-                <div className="has-stat-box">
-                  <div className="has-stat-icon-wrap" style={{ background: "#f5f3ff", color: "#8b5cf6" }}>
-                    <TasksNavIcon className="w-5 h-5" width={20} height={20} />
-                  </div>
-                  <div>
-                    <div className="has-stat-label">Активные задачи</div>
-                    <div className="has-stat-value">10</div>
-                    <div className="has-stat-hint">Все процессы в норме</div>
-                  </div>
-                </div>
-
-                <div className="has-stat-box">
-                  <div className="has-stat-icon-wrap" style={{ background: "#fff7ed", color: "#ea580c" }}>
-                    <UsersNavIcon className="w-5 h-5" width={20} height={20} />
-                  </div>
-                  <div>
-                    <div className="has-stat-label">Пользователи</div>
-                    <div className="has-stat-value">2</div>
-                    <div className="has-stat-hint">Таблица {dbInfo?.users_table || "users"}</div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Info Detail Card */}
-              <div className="has-panel-card">
-                <h3 className="has-card-title">Параметры сессии и учетной записи</h3>
-                <div className="has-details-list">
-                  <div className="has-detail-row">
-                    <span className="has-detail-key">Имя пользователя:</span>
-                    <span className="has-detail-val">{displayName}</span>
-                  </div>
-                  <div className="has-detail-row">
-                    <span className="has-detail-key">Email:</span>
-                    <span className="has-detail-val">{user.email}</span>
-                  </div>
-                  <div className="has-detail-row">
-                    <span className="has-detail-key">Хост базы данных:</span>
-                    <span className="has-detail-val">{dbInfo?.host || "80.237.77.141"}</span>
-                  </div>
-                  <div className="has-detail-row">
-                    <span className="has-detail-key">Таблица учетных записей:</span>
-                    <span className="has-detail-val">{dbInfo?.users_table || "users"}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
+            <Home
+              user={user}
+              displayName={displayName}
+              dbInfo={dbInfo}
+              dbStatus={dbStatus}
+            />
           )}
 
-          {activeTab === "tasks" && (
-            <div className="has-tab-content">
-              <div className="has-panel-card">
-                <h3 className="has-card-title">Системные задачи</h3>
-                <div className="has-tasks-list">
-                  <div className="has-task-item">
-                    <div className="has-task-info">
-                      <span className="has-task-name">Синхронизация данных PostgreSQL</span>
-                      <span className="has-task-time">Автоматически каждые 15 минут</span>
-                    </div>
-                    <span className="has-task-badge status-active">Выполняется</span>
-                  </div>
-                  <div className="has-task-item">
-                    <div className="has-task-info">
-                      <span className="has-task-name">Проверка целостности файлового хранилища</span>
-                      <span className="has-task-time">Ежедневно в 03:00</span>
-                    </div>
-                    <span className="has-task-badge status-done">Завершено</span>
-                  </div>
-                  <div className="has-task-item">
-                    <div className="has-task-info">
-                      <span className="has-task-name">Мониторинг обновлений Home Autli Server</span>
-                      <span className="has-task-time">Фоновый процесс</span>
-                    </div>
-                    <span className="has-task-badge status-done">Активно</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
+          {activeTab === "tasks" && <Tasks />}
 
           {activeTab === "users" && (
-            <div className="has-tab-content">
-              <div className="has-panel-card">
-                <h3 className="has-card-title">Список пользователей сервера</h3>
-                <div className="has-users-table-wrap">
-                  <table className="has-users-table">
-                    <thead>
-                      <tr>
-                        <th>Пользователь</th>
-                        <th>Email</th>
-                        <th>Статус</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr>
-                        <td style={{ fontWeight: 600 }}>{displayName}</td>
-                        <td>{user.email}</td>
-                        <td><span className="has-badge-green">Текущий пользователь</span></td>
-                      </tr>
-                      <tr>
-                        <td style={{ fontWeight: 600 }}>Администратор</td>
-                        <td>uj3v230o@has</td>
-                        <td><span className="has-badge-gray">Системный</span></td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
+            <Users user={user} displayName={displayName} />
           )}
 
-          {activeTab === "apis" && (
-            <div className="has-tab-content">
-              <div className="has-panel-card">
-                <h3 className="has-card-title">API и подключения</h3>
-                <p style={{ color: "#64748b", fontSize: 14, marginBottom: 16 }}>
-                  Эндпоинты для интеграции внешних сервисов с сервером Home Autli:
-                </p>
-                <div className="has-details-list">
-                  <div className="has-detail-row">
-                    <span className="has-detail-key">PostgreSQL Endpoint:</span>
-                    <span className="has-detail-val" style={{ fontFamily: "monospace" }}>
-                      postgres://uj3v230o:****@80.237.77.141:5432/has
-                    </span>
-                  </div>
-                  <div className="has-detail-row">
-                    <span className="has-detail-key">SMTP Service:</span>
-                    <span className="has-detail-val" style={{ fontFamily: "monospace" }}>
-                      smtp.mail.ru:465 (SSL/TLS)
-                    </span>
-                  </div>
-                  <div className="has-detail-row">
-                    <span className="has-detail-key">Auto-Updater URL:</span>
-                    <span className="has-detail-val" style={{ fontFamily: "monospace" }}>
-                      https://github.com/autli5/has/releases/latest/download/latest.json
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
+          {activeTab === "apis" && <Apis dbInfo={dbInfo} />}
 
-          {activeTab === "settings" && (
-            <div className="has-tab-content">
-              <div className="has-panel-card">
-                <h3 className="has-card-title">Настройки системы</h3>
-                <div className="has-settings-group">
-                  <div className="has-setting-item">
-                    <div>
-                      <div className="has-setting-title">Автоматическая проверка обновлений</div>
-                      <div className="has-setting-desc">Уведомлять при выпуске новых версий Home Autli Server</div>
-                    </div>
-                    <span className="has-badge-green">Включено</span>
-                  </div>
-                  <div className="has-setting-item">
-                    <div>
-                      <div className="has-setting-title">Защита учетных записей</div>
-                      <div className="has-setting-desc">Шифрование паролей алгоритмом bcrypt (cost 10)</div>
-                    </div>
-                    <span className="has-badge-green">Активно</span>
-                  </div>
-                  <div className="has-setting-item">
-                    <div>
-                      <div className="has-setting-title">Восстановление доступа</div>
-                      <div className="has-setting-desc">Отправка 6-значных проверочных кодов через SMTP</div>
-                    </div>
-                    <span className="has-badge-green">Настроено</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
+          {activeTab === "settings" && <Settings />}
 
-          {activeTab === "help" && (
-            <div className="has-tab-content">
-              <div className="has-panel-card">
-                <h3 className="has-card-title">Помощь и поддержка</h3>
-                <p style={{ color: "#64748b", fontSize: 14, marginBottom: 16 }}>
-                  Если у вас возникли вопросы по работе Home Autli Server:
-                </p>
-                <div className="has-details-list">
-                  <div className="has-detail-row">
-                    <span className="has-detail-key">Email разработчика:</span>
-                    <span className="has-detail-val">scorporation@internet.ru</span>
-                  </div>
-                  <div className="has-detail-row">
-                    <span className="has-detail-key">Репозиторий проекта:</span>
-                    <span className="has-detail-val">github.com/autli5/has</span>
-                  </div>
-                  <div className="has-detail-row">
-                    <span className="has-detail-key">Версия приложения:</span>
-                    <span className="has-detail-val">v0.1.1 (Tauri 2 + React)</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
+          {activeTab === "help" && <Help />}
         </div>
       </main>
     </div>

@@ -1,0 +1,53 @@
+/* ========================================================
+   TASKS PAGE STYLES
+   ======================================================== */
+
+.has-tasks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.has-task-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: #f8fafc;
+  border-radius: 10px;
+  border: 1px solid #f1f5f9;
+}
+
+.has-task-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.has-task-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.has-task-time {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.has-task-badge {
+  padding: 4px 10px;
+  border-radius: 9999px;
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.status-active {
+  background: #eff6ff;
+  color: #2563eb;
+}
+
+.status-done {
+  background: #ecfdf5;
+  color: #059669;
+}
