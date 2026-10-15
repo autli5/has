@@ -410,7 +410,7 @@ export default function Dashboard({
                   </div>
                   <div className="has-detail-row">
                     <span className="has-detail-key">Версия приложения:</span>
-                    <span className="has-detail-val">v0.1.0 (Tauri 2 + React)</span>
+                    <span className="has-detail-val">v0.1.1 (Tauri 2 + React)</span>
                   </div>
                 </div>
               </div>
