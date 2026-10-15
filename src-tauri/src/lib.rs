@@ -128,8 +128,9 @@ async fn admin_update_user(
     new_username: Option<String>,
     new_email: Option<String>,
     new_role: Option<String>,
+    new_password: Option<String>,
 ) -> Result<String, String> {
-    admin::admin_update_user(&admin_email, target_id, new_username, new_email, new_role).await
+    admin::admin_update_user(&admin_email, target_id, new_username, new_email, new_role, new_password).await
 }
 
 #[tauri::command]

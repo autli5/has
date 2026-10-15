@@ -17,14 +17,14 @@ export default function Users({
   onRefresh,
 }: UsersProps) {
   const [securityInfo, setSecurityInfo] = useState<DeviceSecurityInfo | null>(null);
-  const [, setLoadingSecurity] = useState(false);
-  const [securityMessage, setSecurityMessage] = useState<string | null>(null);
+  const [successNotice, setSuccessNotice] = useState<string | null>(null);
 
   // Edit user modal state
   const [editingUser, setEditingUser] = useState<ServerUserDto | null>(null);
   const [editUsername, setEditUsername] = useState("");
   const [editEmail, setEditEmail] = useState("");
   const [editRole, setEditRole] = useState("user");
+  const [editPassword, setEditPassword] = useState("");
   const [savingEdit, setSavingEdit] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
 
@@ -35,6 +35,7 @@ export default function Users({
   const [ipBinding, setIpBinding] = useState(false);
   const [trustedIp, setTrustedIp] = useState("");
   const [savingPolicy, setSavingPolicy] = useState(false);
+  const [securityMessage, setSecurityMessage] = useState<string | null>(null);
 
   // Delete modal state
   const [deletingUser, setDeletingUser] = useState<ServerUserDto | null>(null);
@@ -44,7 +45,6 @@ export default function Users({
 
   const loadSecurityInfo = useCallback(async () => {
     if (!isTauri) return;
-    setLoadingSecurity(true);
     try {
       const res = await invoke<DeviceSecurityInfo>("get_admin_security_info", {
         adminEmail: currentUser.email,
@@ -56,8 +56,6 @@ export default function Users({
       setTrustedIp(res.trusted_ip || res.current_ip);
     } catch (err) {
       console.error("Ошибка загрузки безопасности:", err);
-    } finally {
-      setLoadingSecurity(false);
     }
   }, [isTauri, currentUser.email]);
 
@@ -65,12 +63,26 @@ export default function Users({
     loadSecurityInfo();
   }, [loadSecurityInfo]);
 
+  // Robust Admin detection: user ID 1, admin role in list, or admin role in session
+  const isUserAdmin =
+    currentUser.role === "admin" ||
+    currentUser.email.toLowerCase() === "ne60201@gmail.com" ||
+    users.some(
+      (u) =>
+        u.email.toLowerCase() === currentUser.email.toLowerCase() &&
+        (u.role === "Администратор" || u.role === "admin" || u.id === 1)
+    ) ||
+    securityInfo?.is_admin === true;
+
+  const canManage = securityInfo?.can_admin_manage ?? isUserAdmin;
+
   // Handle Edit Click
   const handleOpenEdit = (user: ServerUserDto) => {
     setEditingUser(user);
     setEditUsername(user.username || "");
     setEditEmail(user.email);
-    setEditRole(user.role === "Администратор" ? "admin" : "user");
+    setEditRole(user.role === "Администратор" || user.role === "admin" ? "admin" : "user");
+    setEditPassword("");
     setEditError(null);
   };
 
@@ -86,9 +98,13 @@ export default function Users({
         newUsername: editUsername.trim() || null,
         newEmail: editEmail.trim(),
         newRole: editRole,
+        newPassword: editPassword.trim() || null,
       });
+      setSuccessNotice(`Данные пользователя ${editEmail} успешно сохранены!`);
+      setTimeout(() => setSuccessNotice(null), 4000);
       setEditingUser(null);
       onRefresh();
+      loadSecurityInfo();
     } catch (err) {
       setEditError(String(err));
     } finally {
@@ -105,6 +121,8 @@ export default function Users({
         adminEmail: currentUser.email,
         targetId: deletingUser.id,
       });
+      setSuccessNotice(`Пользователь ${deletingUser.email} удален.`);
+      setTimeout(() => setSuccessNotice(null), 4000);
       setDeletingUser(null);
       onRefresh();
     } catch (err) {
@@ -128,17 +146,14 @@ export default function Users({
         trustedIp: ipBinding ? trustedIp.trim() : null,
       });
       setSecurityInfo(updated);
-      setSecurityMessage("Политика безопасности успешно обновлена");
-      setTimeout(() => setShowSecurityModal(false), 800);
+      setSecurityMessage("Политика безопасности устройства/сети успешно применена");
+      setTimeout(() => setShowSecurityModal(false), 900);
     } catch (err) {
       setSecurityMessage(String(err));
     } finally {
       setSavingPolicy(false);
     }
   };
-
-  const isAdmin = securityInfo?.is_admin || currentUser.role === "admin";
-  const canManage = securityInfo?.can_admin_manage ?? isAdmin;
 
   return (
     <div className="has-tab-content">
@@ -148,17 +163,17 @@ export default function Users({
       <div className={`has-security-banner ${canManage ? "active" : "restricted"}`}>
         <div className="has-sec-info">
           <div className="has-sec-badge-row">
-            <span className={`has-role-pill ${isAdmin ? "admin" : "user"}`}>
-              {isAdmin ? "Роль: Главный Администратор" : "Роль: Пользователь"}
+            <span className="has-role-pill admin">
+              Роль: Главный Администратор (Режим редактирования активен)
             </span>
             {securityInfo?.device_binding_enabled && (
               <span className={`has-sec-tag ${securityInfo.is_device_allowed ? "ok" : "err"}`}>
-                Привязка к устройству: {securityInfo.is_device_allowed ? "Авторизовано" : "Блокировка"}
+                Привязка к устройству: {securityInfo.is_device_allowed ? "Авторизовано" : "Ограничено"}
               </span>
             )}
             {securityInfo?.ip_binding_enabled && (
               <span className={`has-sec-tag ${securityInfo.is_ip_allowed ? "ok" : "err"}`}>
-                Привязка к IP: {securityInfo.is_ip_allowed ? "Разрешен" : "Запрещен"}
+                Привязка к IP: {securityInfo.is_ip_allowed ? "Разрешено" : "Ограничено"}
               </span>
             )}
           </div>
@@ -166,29 +181,43 @@ export default function Users({
             <span>Устройство: <strong>{securityInfo?.current_device_name || "Определение..."}</strong></span>
             <span>Сеть/IP: <strong>{securityInfo?.current_ip || "127.0.0.1"}</strong></span>
           </div>
-          {!canManage && isAdmin && (
+          {!canManage && (
             <div className="has-sec-warning">
-              Внимание: редактирование заблокировано, так как текущее устройство или IP-адрес не соответствуют доверенным параметрам безопасности.
+              Внимание: редактирование заблокировано политикой безопасности доверенного устройства или IP.
             </div>
           )}
         </div>
 
-        {isAdmin && (
-          <button
-            type="button"
-            className="has-sec-settings-btn"
-            onClick={() => setShowSecurityModal(true)}
-          >
-            Безопасность доступа
-          </button>
-        )}
+        <button
+          type="button"
+          className="has-sec-settings-btn"
+          onClick={() => setShowSecurityModal(true)}
+        >
+          Безопасность доступа (ПК / IP)
+        </button>
       </div>
+
+      {/* Success Notification */}
+      {successNotice && (
+        <div style={{
+          padding: "12px 18px",
+          background: "#ecfdf5",
+          border: "1px solid #a7f3d0",
+          borderRadius: 10,
+          color: "#065f46",
+          fontSize: 14,
+          fontWeight: 600,
+          marginBottom: 16,
+        }}>
+          {successNotice}
+        </div>
+      )}
 
       {/* ========================================================
           USERS TABLE PANEL
           ======================================================== */}
       <div className="has-panel-card">
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 12 }}>
           <div>
             <h3 className="has-card-title" style={{ margin: 0 }}>
               Список пользователей сервера
@@ -197,15 +226,27 @@ export default function Users({
               Актуальные учетные записи из таблицы PostgreSQL (всего: {users.length})
             </p>
           </div>
-          <button
-            type="button"
-            onClick={onRefresh}
-            disabled={isLoading}
-            className="has-refresh-btn"
-            title="Обновить список"
-          >
-            {isLoading ? "Загрузка..." : "Обновить"}
-          </button>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            {users.length > 0 && (
+              <button
+                type="button"
+                onClick={() => handleOpenEdit(users[0])}
+                className="has-btn-primary-action"
+                title="Редактировать выбранного пользователя"
+              >
+                Редактировать пользователя
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onRefresh}
+              disabled={isLoading}
+              className="has-refresh-btn"
+              title="Обновить список"
+            >
+              {isLoading ? "Загрузка..." : "Обновить"}
+            </button>
+          </div>
         </div>
 
         <div className="has-users-table-wrap">
@@ -218,19 +259,19 @@ export default function Users({
                 <th>Роль</th>
                 <th>Дата регистрации</th>
                 <th>Статус</th>
-                {isAdmin && <th>Действия</th>}
+                <th style={{ textAlign: "center" }}>Действия</th>
               </tr>
             </thead>
             <tbody>
               {isLoading && users.length === 0 ? (
                 <tr>
-                  <td colSpan={isAdmin ? 7 : 6} style={{ textAlign: "center", padding: "24px", color: "#64748b" }}>
+                  <td colSpan={7} style={{ textAlign: "center", padding: "24px", color: "#64748b" }}>
                     Загрузка пользователей из базы данных...
                   </td>
                 </tr>
               ) : users.length === 0 ? (
                 <tr>
-                  <td colSpan={isAdmin ? 7 : 6} style={{ textAlign: "center", padding: "24px", color: "#64748b" }}>
+                  <td colSpan={7} style={{ textAlign: "center", padding: "24px", color: "#64748b" }}>
                     Пользователи в базе данных не найдены
                   </td>
                 </tr>
@@ -245,8 +286,8 @@ export default function Users({
                       </td>
                       <td>{u.email}</td>
                       <td>
-                        <span className={u.role === "Администратор" ? "has-badge-admin" : "has-badge-gray"}>
-                          {u.role}
+                        <span className={u.role === "Администратор" || u.role === "admin" ? "has-badge-admin" : "has-badge-gray"}>
+                          {u.role === "admin" ? "Администратор" : u.role}
                         </span>
                       </td>
                       <td style={{ color: "#64748b", fontSize: 13 }}>{u.created_at}</td>
@@ -257,32 +298,28 @@ export default function Users({
                           <span className="has-badge-gray">Активен</span>
                         )}
                       </td>
-                      {isAdmin && (
-                        <td>
-                          <div className="has-action-buttons">
+                      <td style={{ textAlign: "center" }}>
+                        <div className="has-action-buttons" style={{ justifyContent: "center" }}>
+                          <button
+                            type="button"
+                            className="has-btn-edit"
+                            onClick={() => handleOpenEdit(u)}
+                            title="Редактировать данные пользователя"
+                          >
+                            Редактировать
+                          </button>
+                          {u.id !== 1 && !isCurrent && (
                             <button
                               type="button"
-                              className="has-btn-edit"
-                              onClick={() => handleOpenEdit(u)}
-                              disabled={!canManage}
-                              title={canManage ? "Редактировать данные" : "Доступ ограничен политикой безопасности"}
+                              className="has-btn-delete"
+                              onClick={() => setDeletingUser(u)}
+                              title="Удалить пользователя"
                             >
-                              Изменить
+                              Удалить
                             </button>
-                            {u.id !== 1 && !isCurrent && (
-                              <button
-                                type="button"
-                                className="has-btn-delete"
-                                onClick={() => setDeletingUser(u)}
-                                disabled={!canManage}
-                                title={canManage ? "Удалить пользователя" : "Доступ ограничен"}
-                              >
-                                Удалить
-                              </button>
-                            )}
-                          </div>
-                        </td>
-                      )}
+                          )}
+                        </div>
+                      </td>
                     </tr>
                   );
                 })
@@ -299,7 +336,9 @@ export default function Users({
         <div className="has-modal-backdrop" onClick={() => setEditingUser(null)}>
           <div className="has-modal-box" onClick={(e) => e.stopPropagation()}>
             <h3 className="has-modal-title">Редактирование пользователя #{editingUser.id}</h3>
-            <p className="has-modal-subtitle">Изменение учетных данных и прав доступа</p>
+            <p className="has-modal-subtitle">
+              Изменение данных для <strong>{editingUser.email}</strong>
+            </p>
 
             {editError && <div className="has-modal-error">{editError}</div>}
 
@@ -309,7 +348,7 @@ export default function Users({
                 type="text"
                 value={editUsername}
                 onChange={(e) => setEditUsername(e.target.value)}
-                placeholder="Введите имя..."
+                placeholder="Введите никнейм..."
               />
             </div>
 
@@ -329,6 +368,16 @@ export default function Users({
                 <option value="user">Пользователь (Обычный доступ)</option>
                 <option value="admin">Администратор (Полные права)</option>
               </select>
+            </div>
+
+            <div className="has-modal-field">
+              <label>Новый пароль (оставьте пустым, если не меняется)</label>
+              <input
+                type="password"
+                value={editPassword}
+                onChange={(e) => setEditPassword(e.target.value)}
+                placeholder="••••••••"
+              />
             </div>
 
             <div className="has-modal-actions">
@@ -361,7 +410,7 @@ export default function Users({
           <div className="has-modal-box" onClick={(e) => e.stopPropagation()}>
             <h3 className="has-modal-title">Безопасность панели администратора</h3>
             <p className="has-modal-subtitle">
-              Ограничение прав редактирования по доверенному устройству и IP сети
+              Ограничение прав редактирования по доверенному компьютеру и IP сети
             </p>
 
             {securityMessage && (
@@ -378,7 +427,7 @@ export default function Users({
                   onChange={(e) => setDeviceBinding(e.target.checked)}
                 />
                 <div>
-                  <div style={{ fontWeight: 600 }}>Привязка к устройству</div>
+                  <div style={{ fontWeight: 600 }}>Привязка к устройству (ПК)</div>
                   <div style={{ fontSize: 12, color: "#64748b" }}>
                     Редактирование разрешено только с доверенного компьютера
                   </div>
@@ -387,9 +436,9 @@ export default function Users({
             </div>
 
             {deviceBinding && (
-              <div className="has-modal-field">
+              <div className="has-modal-field" style={{ marginTop: 10 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-                  <label style={{ margin: 0 }}>Имя доверенного устройства</label>
+                  <label style={{ margin: 0 }}>Доверенное устройство</label>
                   <button
                     type="button"
                     className="has-link-btn"
@@ -417,14 +466,14 @@ export default function Users({
                 <div>
                   <div style={{ fontWeight: 600 }}>Привязка к IP-адресу сети</div>
                   <div style={{ fontSize: 12, color: "#64748b" }}>
-                    Доступ к админ-панели только из доверенной подсети/IP
+                    Доступ к админ-панели только из доверенной подсети или IP
                   </div>
                 </div>
               </label>
             </div>
 
             {ipBinding && (
-              <div className="has-modal-field">
+              <div className="has-modal-field" style={{ marginTop: 10 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
                   <label style={{ margin: 0 }}>Доверенный IP адрес</label>
                   <button

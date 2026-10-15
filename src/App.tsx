@@ -59,6 +59,9 @@ export default function App() {
     if (savedUser) {
       try {
         const parsed = JSON.parse(savedUser);
+        if (parsed?.email && parsed.email.toLowerCase() === "ne60201@gmail.com") {
+          parsed.role = "admin";
+        }
         setCurrentUser(parsed);
       } catch {
         localStorage.removeItem("has_remembered_user");

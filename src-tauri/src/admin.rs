@@ -185,6 +185,7 @@ pub async fn admin_update_user(
     new_username: Option<String>,
     new_email: Option<String>,
     new_role: Option<String>,
+    new_password: Option<String>,
 ) -> Result<String, String> {
     let sec_info = get_admin_security_info(admin_email).await?;
     if !sec_info.can_admin_manage {
@@ -196,25 +197,49 @@ pub async fn admin_update_user(
 
     let clean_username = new_username.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
     let clean_role = new_role.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).unwrap_or_else(|| "user".to_string());
+    let clean_email = new_email.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
 
-    if let Some(em) = new_email.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()) {
-        let update_sql = format!(
-            "UPDATE {} SET username = $1, {} = $2, role = $3 WHERE id = $4",
-            config.users_table, config.email_column
-        );
-        client
-            .execute(&update_sql, &[&clean_username, &em, &clean_role, &target_id])
-            .await
-            .map_err(|e| format!("Ошибка обновления пользователя: {}", e))?;
+    if let Some(pwd) = new_password.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()) {
+        let hashed = bcrypt::hash(&pwd, 10).map_err(|e| format!("Ошибка хеширования: {}", e))?;
+        if let Some(em) = clean_email {
+            let update_sql = format!(
+                "UPDATE {} SET username = $1, {} = $2, role = $3, {} = $4 WHERE id = $5",
+                config.users_table, config.email_column, config.password_column
+            );
+            client
+                .execute(&update_sql, &[&clean_username, &em, &clean_role, &hashed, &target_id])
+                .await
+                .map_err(|e| format!("Ошибка обновления пользователя: {}", e))?;
+        } else {
+            let update_sql = format!(
+                "UPDATE {} SET username = $1, role = $2, {} = $3 WHERE id = $4",
+                config.users_table, config.password_column
+            );
+            client
+                .execute(&update_sql, &[&clean_username, &clean_role, &hashed, &target_id])
+                .await
+                .map_err(|e| format!("Ошибка обновления пользователя: {}", e))?;
+        }
     } else {
-        let update_sql = format!(
-            "UPDATE {} SET username = $1, role = $2 WHERE id = $3",
-            config.users_table
-        );
-        client
-            .execute(&update_sql, &[&clean_username, &clean_role, &target_id])
-            .await
-            .map_err(|e| format!("Ошибка обновления пользователя: {}", e))?;
+        if let Some(em) = clean_email {
+            let update_sql = format!(
+                "UPDATE {} SET username = $1, {} = $2, role = $3 WHERE id = $4",
+                config.users_table, config.email_column
+            );
+            client
+                .execute(&update_sql, &[&clean_username, &em, &clean_role, &target_id])
+                .await
+                .map_err(|e| format!("Ошибка обновления пользователя: {}", e))?;
+        } else {
+            let update_sql = format!(
+                "UPDATE {} SET username = $1, role = $2 WHERE id = $3",
+                config.users_table
+            );
+            client
+                .execute(&update_sql, &[&clean_username, &clean_role, &target_id])
+                .await
+                .map_err(|e| format!("Ошибка обновления пользователя: {}", e))?;
+        }
     }
 
     Ok("Данные пользователя успешно обновлены".to_string())

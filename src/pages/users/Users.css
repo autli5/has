@@ -28,6 +28,22 @@
   color: #0f172a;
 }
 
+.has-btn-primary-action {
+  padding: 6px 16px;
+  border-radius: 8px;
+  background: #4f46e5;
+  color: #ffffff;
+  border: none;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.has-btn-primary-action:hover {
+  background: #4338ca;
+}
+
 .has-refresh-btn {
   padding: 6px 14px;
   border-radius: 8px;

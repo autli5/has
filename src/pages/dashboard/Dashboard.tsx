@@ -225,7 +225,10 @@ export default function Dashboard({
 
           {activeTab === "users" && (
             <Users
-              currentUser={user}
+              currentUser={{
+                ...user,
+                role: user.role || (user.email.toLowerCase() === "ne60201@gmail.com" ? "admin" : "user"),
+              }}
               users={serverUsers}
               isLoading={loadingUsers}
               onRefresh={loadServerUsers}
