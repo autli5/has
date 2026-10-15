@@ -19,7 +19,7 @@ export default function Help() {
           </div>
           <div className="has-detail-row">
             <span className="has-detail-key">Версия приложения:</span>
-            <span className="has-detail-val">v0.1.1 (Tauri 2 + React)</span>
+            <span className="has-detail-val">v0.1.2 (Tauri 2 + React)</span>
           </div>
         </div>
       </div>
