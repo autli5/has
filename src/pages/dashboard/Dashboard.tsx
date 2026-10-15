@@ -16,7 +16,6 @@ import {
 } from "../../components/Icons";
 import Home from "../home/Home";
 import Storage from "../storage/Storage";
-import Git from "../git/Git";
 import Tasks from "../tasks/Tasks";
 import Users from "../users/Users";
 import Apis from "../apis/Apis";
@@ -137,6 +136,7 @@ export default function Dashboard({
               <GitNavIcon className="w-5 h-5" width={20} height={20} />
               <span>Git</span>
             </div>
+            <span className="has-nav-badge">Скоро</span>
           </button>
 
           <button
@@ -249,7 +249,20 @@ export default function Dashboard({
           )}
 
           {activeTab === "storage" && <Storage currentUser={user} />}
-          {activeTab === "git" && <Git user={user} />}
+          {activeTab === "git" && (
+            <div className="has-card has-storage-overview" style={{ textAlign: "center", padding: "80px 20px" }}>
+              <div style={{ display: "inline-flex", padding: "16px", borderRadius: "50%", background: "rgba(99, 102, 241, 0.1)", marginBottom: "16px" }}>
+                <GitNavIcon className="w-12 h-12" width={48} height={48} />
+              </div>
+              <h2 style={{ fontSize: "22px", fontWeight: "700", margin: "0 0 8px 0", color: "#0f172a" }}>Git (Клон GitHub)</h2>
+              <p style={{ color: "#64748b", maxWidth: "460px", margin: "0 auto", fontSize: "14.5px", lineHeight: "1.6" }}>
+                Раздел находится в разработке. Скоро здесь появится автономный Git-сервер.
+              </p>
+              <div style={{ marginTop: "20px" }}>
+                <span className="has-nav-badge" style={{ padding: "4px 14px", fontSize: "13px" }}>Скоро</span>
+              </div>
+            </div>
+          )}
 
           {activeTab === "tasks" && <Tasks />}
 
