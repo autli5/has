@@ -407,14 +407,46 @@ export function RefreshIcon({ className = "w-5 h-5", width = 20, height = 20 }: 
   );
 }
 
-export function GitNavIcon({ className = "w-5 h-5", width = 20, height = 20 }: IconProps) {
+export function BrainNavIcon({ className = "w-5 h-5", width = 20, height = 20 }: IconProps) {
   return (
     <svg className={className} width={width} height={height} fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path
         strokeLinecap="round"
         strokeLinejoin="round"
         strokeWidth={1.8}
-        d="M7 7a2 2 0 100-4 2 2 0 000 4zm0 14a2 2 0 100-4 2 2 0 000 4zm10-4a2 2 0 100-4 2 2 0 000 4zM7 7v10m0-6a5 5 0 015 5h3"
+        d="M9.5 2A2.5 2.5 0 007 4.5v.18A4 4 0 004 8.5c0 1.28.6 2.42 1.52 3.16A4.5 4.5 0 005.5 20h.5a3 3 0 003-3v-1a2 2 0 012-2h2a2 2 0 012 2v1a3 3 0 003 3h.5a4.5 4.5 0 00-.02-8.34A4 4 0 0020 8.5a4 4 0 00-3-3.82V4.5A2.5 2.5 0 0014.5 2h-5z"
+      />
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={1.8}
+        d="M12 2v13m-3-9.5a2 2 0 013 0m0 0a2 2 0 013 0"
+      />
+    </svg>
+  );
+}
+
+export function TagIcon({ className = "w-4 h-4", width = 16, height = 16 }: IconProps) {
+  return (
+    <svg className={className} width={width} height={height} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={1.8}
+        d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"
+      />
+    </svg>
+  );
+}
+
+export function SparklesIcon({ className = "w-4 h-4", width = 16, height = 16 }: IconProps) {
+  return (
+    <svg className={className} width={width} height={height} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={1.8}
+        d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.286L13 21l-2.286-6.857L5 12l5.714-2.286L13 3z"
       />
     </svg>
   );

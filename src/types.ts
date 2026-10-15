@@ -82,3 +82,58 @@ export interface DeviceSecurityInfo {
   is_ip_allowed: boolean;
   can_admin_manage: boolean;
 }
+
+export type ParaFolder = "00_Inbox" | "01_Projects" | "02_Areas" | "03_Resources" | "04_Archive";
+export type NoteType = "inbox" | "project" | "area" | "resource" | "archive";
+export type NoteStatus = "draft" | "in-progress" | "completed" | "permanent";
+
+export interface NoteSummaryDto {
+  id: number;
+  title: string;
+  folder: ParaFolder;
+  note_type: NoteType;
+  status: NoteStatus;
+  tags: string[];
+  links: string[];
+  summary?: string | null;
+  updated_at: string;
+  created_at: string;
+}
+
+export interface NoteDetailDto {
+  id: number;
+  title: string;
+  folder: ParaFolder;
+  note_type: NoteType;
+  status: NoteStatus;
+  tags: string[];
+  links: string[];
+  summary?: string | null;
+  content: string;
+  file_path?: string | null;
+  updated_at: string;
+  created_at: string;
+}
+
+export interface NoteSaveDto {
+  id?: number | null;
+  title: string;
+  folder: ParaFolder;
+  note_type: NoteType;
+  status: NoteStatus;
+  tags: string[];
+  links: string[];
+  summary?: string | null;
+  content: string;
+}
+
+export interface NotesStatsDto {
+  total_notes: number;
+  inbox_count: number;
+  projects_count: number;
+  areas_count: number;
+  resources_count: number;
+  archive_count: number;
+  all_tags: string[];
+}
+

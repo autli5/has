@@ -1,6 +1,7 @@
 mod admin;
 mod auth;
 mod storage;
+mod second_brain;
 
 use admin::DeviceSecurityInfo;
 use auth::{AuthResponse, DbStatus, ResetRequestResponse};
@@ -192,7 +193,12 @@ pub fn run() {
             get_admin_security_info,
             update_admin_security_policy,
             admin_update_user,
-            admin_delete_user
+            admin_delete_user,
+            second_brain::list_server_notes,
+            second_brain::get_server_note_by_id,
+            second_brain::save_server_note,
+            second_brain::delete_server_note,
+            second_brain::get_notes_stats
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
