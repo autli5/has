@@ -4,6 +4,7 @@ import type { UserDto, DbStatus, SafeDbInfo, ServerUserDto } from "../../types";
 import logoUrl from "../../assets/logo.png";
 import {
   HomeNavIcon,
+  StorageNavIcon,
   TasksNavIcon,
   UsersNavIcon,
   ApiNavIcon,
@@ -13,6 +14,7 @@ import {
   LogOutIcon,
 } from "../../components/Icons";
 import Home from "../home/Home";
+import Storage from "../storage/Storage";
 import Tasks from "../tasks/Tasks";
 import Users from "../users/Users";
 import Apis from "../apis/Apis";
@@ -27,7 +29,7 @@ interface DashboardProps {
   onLogout: () => void;
 }
 
-type NavTab = "home" | "tasks" | "users" | "apis" | "settings" | "help";
+type NavTab = "home" | "storage" | "tasks" | "users" | "apis" | "settings" | "help";
 
 export default function Dashboard({
   user,
@@ -115,6 +117,17 @@ export default function Dashboard({
 
           <button
             type="button"
+            className={`has-nav-item ${activeTab === "storage" ? "active" : ""}`}
+            onClick={() => setActiveTab("storage")}
+          >
+            <div className="has-nav-item-left">
+              <StorageNavIcon className="w-5 h-5" width={20} height={20} />
+              <span>Storage</span>
+            </div>
+          </button>
+
+          <button
+            type="button"
             className={`has-nav-item ${activeTab === "users" ? "active" : ""}`}
             onClick={() => setActiveTab("users")}
           >
@@ -192,6 +205,7 @@ export default function Dashboard({
           <div>
             <h1 className="has-header-title">
               {activeTab === "home" && "Home Overview"}
+              {activeTab === "storage" && "Файловое хранилище"}
               {activeTab === "tasks" && "Tasks Management"}
               {activeTab === "users" && "User Directory"}
               {activeTab === "apis" && "API Endpoints"}
@@ -220,6 +234,8 @@ export default function Dashboard({
               usersCount={serverUsers.length}
             />
           )}
+
+          {activeTab === "storage" && <Storage currentUser={user} />}
 
           {activeTab === "tasks" && <Tasks />}
 

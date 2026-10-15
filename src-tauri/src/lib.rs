@@ -69,13 +69,13 @@ async fn get_storage_stats() -> Result<StorageStats, String> {
 }
 
 #[tauri::command]
-async fn list_storage_items(user_email: String) -> Result<Vec<StorageItemDto>, String> {
-    storage::list_server_items(&user_email).await
+async fn list_storage_items(user_email: String, folder_id: Option<i64>) -> Result<Vec<StorageItemDto>, String> {
+    storage::list_server_items(&user_email, folder_id).await
 }
 
 #[tauri::command]
-async fn create_server_folder(user_email: String, folder_name: String) -> Result<StorageItemDto, String> {
-    storage::create_server_folder(&user_email, &folder_name).await
+async fn create_server_folder(user_email: String, folder_name: String, parent_id: Option<i64>) -> Result<StorageItemDto, String> {
+    storage::create_server_folder(&user_email, &folder_name, parent_id).await
 }
 
 #[tauri::command]
@@ -95,8 +95,14 @@ async fn upload_server_file(
     size_bytes: i64,
     mime_type: Option<String>,
     content_base64: Option<String>,
+    folder_id: Option<i64>,
 ) -> Result<StorageItemDto, String> {
-    storage::upload_server_file(&user_email, &file_name, size_bytes, mime_type, content_base64).await
+    storage::upload_server_file(&user_email, &file_name, size_bytes, mime_type, content_base64, folder_id).await
+}
+
+#[tauri::command]
+async fn download_server_file(user_email: String, file_id: i64) -> Result<storage::ServerFileDownloadDto, String> {
+    storage::download_server_file(&user_email, file_id).await
 }
 
 #[tauri::command]
@@ -160,6 +166,7 @@ pub fn run() {
             delete_server_item,
             rename_server_item,
             upload_server_file,
+            download_server_file,
             list_server_users,
             get_admin_security_info,
             update_admin_security_policy,

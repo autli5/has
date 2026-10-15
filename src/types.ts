@@ -49,8 +49,17 @@ export interface StorageItemDto {
   size_formatted: string;
   size_bytes: number;
   item_type: "folder" | "file";
+  folder_id?: number | null;
   modified: string;
   user_email: string;
+}
+
+export interface ServerFileDownloadDto {
+  id: number;
+  name: string;
+  mime_type?: string | null;
+  size_bytes: number;
+  content_base64: string;
 }
 
 export interface ServerUserDto {

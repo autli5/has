@@ -20,8 +20,18 @@ pub struct StorageItemDto {
     pub size_formatted: String,
     pub size_bytes: i64,
     pub item_type: String, // "folder" or "file"
+    pub folder_id: Option<i64>,
     pub modified: String,
     pub user_email: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ServerFileDownloadDto {
+    pub id: i64,
+    pub name: String,
+    pub mime_type: Option<String>,
+    pub size_bytes: i64,
+    pub content_base64: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -191,7 +201,7 @@ pub async fn get_server_storage_stats() -> Result<StorageStats, String> {
     })
 }
 
-pub async fn list_server_items(user_email: &str) -> Result<Vec<StorageItemDto>, String> {
+pub async fn list_server_items(user_email: &str, folder_id: Option<i64>) -> Result<Vec<StorageItemDto>, String> {
     let _ = init_storage_tables().await;
     let config = get_db_config();
     let client = connect_to_db(&config).await?;
@@ -199,21 +209,35 @@ pub async fn list_server_items(user_email: &str) -> Result<Vec<StorageItemDto>, 
     let mut items = Vec::new();
 
     // 1. Fetch folders
-    let folder_rows = client
-        .query(
-            "SELECT id, name, created_at FROM server_folders WHERE user_email = $1 ORDER BY name ASC;",
-            &[&user_email],
-        )
-        .await
-        .map_err(|e| format!("Error querying folders: {}", e))?;
+    let folder_rows = match folder_id {
+        Some(fid) => {
+            client
+                .query(
+                    "SELECT id, name, created_at, parent_id FROM server_folders WHERE user_email = $1 AND parent_id = $2 ORDER BY name ASC;",
+                    &[&user_email, &fid],
+                )
+                .await
+                .map_err(|e| format!("Error querying folders: {}", e))?
+        }
+        None => {
+            client
+                .query(
+                    "SELECT id, name, created_at, parent_id FROM server_folders WHERE user_email = $1 AND parent_id IS NULL ORDER BY name ASC;",
+                    &[&user_email],
+                )
+                .await
+                .map_err(|e| format!("Error querying folders: {}", e))?
+        }
+    };
 
     for row in folder_rows {
         let id: i64 = row.get(0);
         let name: String = row.get(1);
         let created_at: Option<chrono::DateTime<chrono::Utc>> = row.try_get(2).ok();
+        let parent: Option<i64> = row.try_get(3).ok();
         let date_str = created_at
-            .map(|dt| dt.format("%Y/%m/%d").to_string())
-            .unwrap_or_else(|| "2026/10/14".to_string());
+            .map(|dt| dt.format("%d.%m.%Y %H:%M").to_string())
+            .unwrap_or_else(|| "—".to_string());
 
         // Calculate folder size from contained files
         let size_row = client
@@ -236,28 +260,43 @@ pub async fn list_server_items(user_email: &str) -> Result<Vec<StorageItemDto>, 
             size_formatted: if folder_bytes > 0 { format_bytes(folder_bytes) } else { "Папка".to_string() },
             size_bytes: folder_bytes as i64,
             item_type: "folder".to_string(),
+            folder_id: parent,
             modified: date_str,
             user_email: user_email.to_string(),
         });
     }
 
-    // 2. Fetch standalone files (in root folder)
-    let file_rows = client
-        .query(
-            "SELECT id, name, size_bytes, created_at FROM server_files WHERE user_email = $1 AND folder_id IS NULL ORDER BY name ASC;",
-            &[&user_email],
-        )
-        .await
-        .map_err(|e| format!("Error querying files: {}", e))?;
+    // 2. Fetch files
+    let file_rows = match folder_id {
+        Some(fid) => {
+            client
+                .query(
+                    "SELECT id, name, size_bytes, created_at, folder_id FROM server_files WHERE user_email = $1 AND folder_id = $2 ORDER BY name ASC;",
+                    &[&user_email, &fid],
+                )
+                .await
+                .map_err(|e| format!("Error querying files: {}", e))?
+        }
+        None => {
+            client
+                .query(
+                    "SELECT id, name, size_bytes, created_at, folder_id FROM server_files WHERE user_email = $1 AND folder_id IS NULL ORDER BY name ASC;",
+                    &[&user_email],
+                )
+                .await
+                .map_err(|e| format!("Error querying files: {}", e))?
+        }
+    };
 
     for row in file_rows {
         let id: i64 = row.get(0);
         let name: String = row.get(1);
         let size_bytes: i64 = row.get(2);
         let created_at: Option<chrono::DateTime<chrono::Utc>> = row.try_get(3).ok();
+        let f_id: Option<i64> = row.try_get(4).ok();
         let date_str = created_at
-            .map(|dt| dt.format("%Y/%m/%d").to_string())
-            .unwrap_or_else(|| "2026/10/14".to_string());
+            .map(|dt| dt.format("%d.%m.%Y %H:%M").to_string())
+            .unwrap_or_else(|| "—".to_string());
 
         items.push(StorageItemDto {
             id: format!("file_{}", id),
@@ -265,25 +304,25 @@ pub async fn list_server_items(user_email: &str) -> Result<Vec<StorageItemDto>, 
             size_formatted: format_bytes(size_bytes.max(0) as u64),
             size_bytes,
             item_type: "file".to_string(),
+            folder_id: f_id,
             modified: date_str,
             user_email: user_email.to_string(),
         });
     }
 
-    // If this is a new user with 0 items, seed standard default folders
-    if items.is_empty() {
-        let default_folders = ["Документы", "Изображения", "Видео", "Загрузки"];
+    // Seed standard root folders if totally empty root
+    if folder_id.is_none() && items.is_empty() {
+        let default_folders = ["Документы", "Изображения", "Архивы"];
         for folder_name in default_folders {
-            let _ = create_server_folder(user_email, folder_name).await;
+            let _ = create_server_folder(user_email, folder_name, None).await;
         }
-        // Recursively reload
-        return Box::pin(list_server_items(user_email)).await;
+        return Box::pin(list_server_items(user_email, None)).await;
     }
 
     Ok(items)
 }
 
-pub async fn create_server_folder(user_email: &str, folder_name: &str) -> Result<StorageItemDto, String> {
+pub async fn create_server_folder(user_email: &str, folder_name: &str, parent_id: Option<i64>) -> Result<StorageItemDto, String> {
     let clean_name = folder_name.trim();
     if clean_name.is_empty() {
         return Err("Имя папки не может быть пустым".to_string());
@@ -296,8 +335,8 @@ pub async fn create_server_folder(user_email: &str, folder_name: &str) -> Result
     // Insert into database
     let row = client
         .query_one(
-            "INSERT INTO server_folders (user_email, name) VALUES ($1, $2) RETURNING id, created_at;",
-            &[&user_email, &clean_name],
+            "INSERT INTO server_folders (user_email, name, parent_id) VALUES ($1, $2, $3) RETURNING id, created_at;",
+            &[&user_email, &clean_name, &parent_id],
         )
         .await
         .map_err(|e| format!("Не удалось создать папку в БД: {}", e))?;
@@ -305,20 +344,8 @@ pub async fn create_server_folder(user_email: &str, folder_name: &str) -> Result
     let folder_id: i64 = row.get(0);
     let created_at: Option<chrono::DateTime<chrono::Utc>> = row.try_get(1).ok();
     let date_str = created_at
-        .map(|dt| dt.format("%Y/%m/%d").to_string())
-        .unwrap_or_else(|| "2026/10/14".to_string());
-
-    // Actually create the directory on the Linux server filesystem
-    let base_path = env::var("SERVER_STORAGE_PATH")
-        .unwrap_or_else(|_| "/www/server/pgsql/storage".to_string());
-    let safe_user = sanitize_path_segment(user_email);
-    let safe_folder = sanitize_path_segment(clean_name);
-
-    let mkdir_cmd = format!(
-        "COPY (SELECT 1) TO PROGRAM 'mkdir -p \"{}/{}/{}\" 2>/dev/null || true';",
-        base_path, safe_user, safe_folder
-    );
-    let _ = client.batch_execute(&mkdir_cmd).await;
+        .map(|dt| dt.format("%d.%m.%Y %H:%M").to_string())
+        .unwrap_or_else(|| "—".to_string());
 
     Ok(StorageItemDto {
         id: format!("folder_{}", folder_id),
@@ -326,6 +353,7 @@ pub async fn create_server_folder(user_email: &str, folder_name: &str) -> Result
         size_formatted: "Папка".to_string(),
         size_bytes: 0,
         item_type: "folder".to_string(),
+        folder_id: parent_id,
         modified: date_str,
         user_email: user_email.to_string(),
     })
@@ -429,6 +457,7 @@ pub async fn upload_server_file(
     size_bytes: i64,
     mime_type: Option<String>,
     content_base64: Option<String>,
+    folder_id: Option<i64>,
 ) -> Result<StorageItemDto, String> {
     let clean_name = file_name.trim();
     if clean_name.is_empty() {
@@ -451,8 +480,8 @@ pub async fn upload_server_file(
 
     let row = client
         .query_one(
-            "INSERT INTO server_files (user_email, name, size_bytes, mime_type, content) \
-             VALUES ($1, $2, $3, $4, $5) \
+            "INSERT INTO server_files (user_email, name, size_bytes, mime_type, content, folder_id) \
+             VALUES ($1, $2, $3, $4, $5, $6) \
              RETURNING id, created_at;",
             &[
                 &user_email,
@@ -460,6 +489,7 @@ pub async fn upload_server_file(
                 &size_bytes,
                 &mime_type,
                 &binary_content,
+                &folder_id,
             ],
         )
         .await
@@ -468,8 +498,8 @@ pub async fn upload_server_file(
     let file_id: i64 = row.get(0);
     let created_at: Option<chrono::DateTime<chrono::Utc>> = row.try_get(1).ok();
     let date_str = created_at
-        .map(|dt| dt.format("%Y/%m/%d").to_string())
-        .unwrap_or_else(|| "2026/10/14".to_string());
+        .map(|dt| dt.format("%d.%m.%Y %H:%M").to_string())
+        .unwrap_or_else(|| "—".to_string());
 
     Ok(StorageItemDto {
         id: format!("file_{}", file_id),
@@ -477,8 +507,43 @@ pub async fn upload_server_file(
         size_formatted: format_bytes(size_bytes.max(0) as u64),
         size_bytes,
         item_type: "file".to_string(),
+        folder_id,
         modified: date_str,
         user_email: user_email.to_string(),
+    })
+}
+
+pub async fn download_server_file(user_email: &str, file_id: i64) -> Result<ServerFileDownloadDto, String> {
+    let config = get_db_config();
+    let client = connect_to_db(&config).await?;
+
+    let row = client
+        .query_one(
+            "SELECT name, mime_type, size_bytes, content FROM server_files WHERE id = $1 AND user_email = $2;",
+            &[&file_id, &user_email],
+        )
+        .await
+        .map_err(|e| format!("Файл не найден на сервере: {}", e))?;
+
+    let name: String = row.get(0);
+    let mime_type: Option<String> = row.get(1);
+    let size_bytes: i64 = row.get(2);
+    let content: Option<Vec<u8>> = row.get(3);
+
+    let content_b64 = match content {
+        Some(bytes) => {
+            use base64::Engine;
+            base64::engine::general_purpose::STANDARD.encode(&bytes)
+        }
+        None => String::new(),
+    };
+
+    Ok(ServerFileDownloadDto {
+        id: file_id,
+        name,
+        mime_type,
+        size_bytes,
+        content_base64: content_b64,
     })
 }
 
