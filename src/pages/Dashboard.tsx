@@ -6,7 +6,6 @@ import {
   TasksNavIcon,
   UsersNavIcon,
   ApiNavIcon,
-  CreditCardIcon,
   SettingsNavIcon,
   HelpNavIcon,
   SearchIcon,
@@ -22,7 +21,7 @@ interface DashboardProps {
   onLogout: () => void;
 }
 
-type NavTab = "home" | "tasks" | "users" | "apis" | "subscription" | "settings" | "help";
+type NavTab = "home" | "tasks" | "users" | "apis" | "settings" | "help";
 
 export default function Dashboard({
   user,
@@ -109,16 +108,6 @@ export default function Dashboard({
             </div>
           </button>
 
-          <button
-            type="button"
-            className={`has-nav-item ${activeTab === "subscription" ? "active" : ""}`}
-            onClick={() => setActiveTab("subscription")}
-          >
-            <div className="has-nav-item-left">
-              <CreditCardIcon className="w-5 h-5" width={20} height={20} />
-              <span>Subscription</span>
-            </div>
-          </button>
 
           <button
             type="button"
@@ -177,7 +166,6 @@ export default function Dashboard({
               {activeTab === "tasks" && "Tasks Management"}
               {activeTab === "users" && "User Directory"}
               {activeTab === "apis" && "API Endpoints"}
-              {activeTab === "subscription" && "Subscription & Resources"}
               {activeTab === "settings" && "System Settings"}
               {activeTab === "help" && "Help & Support"}
             </h1>
@@ -367,32 +355,6 @@ export default function Dashboard({
                     <span className="has-detail-val" style={{ fontFamily: "monospace" }}>
                       https://github.com/autli5/has/releases/latest/download/latest.json
                     </span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {activeTab === "subscription" && (
-            <div className="has-tab-content">
-              <div className="has-panel-card">
-                <h3 className="has-card-title">Ресурсы сервера</h3>
-                <div className="has-details-list">
-                  <div className="has-detail-row">
-                    <span className="has-detail-key">Серверный тариф:</span>
-                    <span className="has-detail-val">Dedicated VPS Server</span>
-                  </div>
-                  <div className="has-detail-row">
-                    <span className="has-detail-key">Адрес VPS:</span>
-                    <span className="has-detail-val">80.237.77.141</span>
-                  </div>
-                  <div className="has-detail-row">
-                    <span className="has-detail-key">СУБД:</span>
-                    <span className="has-detail-val">PostgreSQL 16.x</span>
-                  </div>
-                  <div className="has-detail-row">
-                    <span className="has-detail-key">Выделенное хранилище:</span>
-                    <span className="has-detail-val">Неограниченно</span>
                   </div>
                 </div>
               </div>
