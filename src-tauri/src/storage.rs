@@ -310,15 +310,6 @@ pub async fn list_server_items(user_email: &str, folder_id: Option<i64>) -> Resu
         });
     }
 
-    // Seed standard root folders if totally empty root
-    if folder_id.is_none() && items.is_empty() {
-        let default_folders = ["Документы", "Изображения", "Архивы"];
-        for folder_name in default_folders {
-            let _ = create_server_folder(user_email, folder_name, None).await;
-        }
-        return Box::pin(list_server_items(user_email, None)).await;
-    }
-
     Ok(items)
 }
 
@@ -331,6 +322,30 @@ pub async fn create_server_folder(user_email: &str, folder_name: &str, parent_id
     let _ = init_storage_tables().await;
     let config = get_db_config();
     let client = connect_to_db(&config).await?;
+
+    // Check if folder with the same name already exists in this directory
+    let existing = match parent_id {
+        Some(pid) => {
+            client
+                .query_opt(
+                    "SELECT id FROM server_folders WHERE user_email = $1 AND parent_id = $2 AND name = $3;",
+                    &[&user_email, &pid, &clean_name],
+                )
+                .await
+        }
+        None => {
+            client
+                .query_opt(
+                    "SELECT id FROM server_folders WHERE user_email = $1 AND parent_id IS NULL AND name = $3;",
+                    &[&user_email, &clean_name],
+                )
+                .await
+        }
+    };
+
+    if let Ok(Some(_)) = existing {
+        return Err(format!("Папка с именем \"{}\" уже существует", clean_name));
+    }
 
     // Insert into database
     let row = client
