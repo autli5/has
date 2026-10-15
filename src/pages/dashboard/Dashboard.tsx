@@ -10,11 +10,13 @@ import {
   ApiNavIcon,
   SettingsNavIcon,
   HelpNavIcon,
+  GitNavIcon,
   SearchIcon,
   LogOutIcon,
 } from "../../components/Icons";
 import Home from "../home/Home";
 import Storage from "../storage/Storage";
+import Git from "../git/Git";
 import Tasks from "../tasks/Tasks";
 import Users from "../users/Users";
 import Apis from "../apis/Apis";
@@ -29,7 +31,7 @@ interface DashboardProps {
   onLogout: () => void;
 }
 
-type NavTab = "home" | "storage" | "tasks" | "users" | "apis" | "settings" | "help";
+type NavTab = "home" | "storage" | "git" | "tasks" | "users" | "apis" | "settings" | "help";
 
 export default function Dashboard({
   user,
@@ -123,6 +125,17 @@ export default function Dashboard({
             <div className="has-nav-item-left">
               <StorageNavIcon className="w-5 h-5" width={20} height={20} />
               <span>Storage</span>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            className={`has-nav-item ${activeTab === "git" ? "active" : ""}`}
+            onClick={() => setActiveTab("git")}
+          >
+            <div className="has-nav-item-left">
+              <GitNavIcon className="w-5 h-5" width={20} height={20} />
+              <span>Git</span>
             </div>
           </button>
 
@@ -236,6 +249,7 @@ export default function Dashboard({
           )}
 
           {activeTab === "storage" && <Storage currentUser={user} />}
+          {activeTab === "git" && <Git user={user} />}
 
           {activeTab === "tasks" && <Tasks />}
 

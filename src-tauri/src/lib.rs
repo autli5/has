@@ -1,6 +1,7 @@
 mod admin;
 mod auth;
 mod storage;
+mod git_server;
 
 use admin::DeviceSecurityInfo;
 use auth::{AuthResponse, DbStatus, ResetRequestResponse};
@@ -192,7 +193,15 @@ pub fn run() {
             get_admin_security_info,
             update_admin_security_policy,
             admin_update_user,
-            admin_delete_user
+            admin_delete_user,
+            git_server::list_server_repositories,
+            git_server::create_server_repository,
+            git_server::delete_server_repository,
+            git_server::get_repository_tree,
+            git_server::get_repository_file_content,
+            git_server::get_repository_commits,
+            git_server::get_repository_branches,
+            git_server::update_server_repository
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
