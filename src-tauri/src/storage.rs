@@ -693,6 +693,139 @@ pub async fn upload_server_file(
     })
 }
 
+pub async fn create_server_file(
+    user_email: &str,
+    file_name: &str,
+    content: Option<String>,
+    folder_id: Option<i64>,
+) -> Result<StorageItemDto, String> {
+    let clean_name = file_name.trim();
+    if clean_name.is_empty() {
+        return Err("Имя файла не может быть пустым".to_string());
+    }
+
+    let _ = init_storage_tables().await;
+    let config = get_db_config();
+    let client = connect_to_db(&config).await?;
+
+    // Check if file with same name already exists in this folder
+    let existing = match folder_id {
+        Some(fid) => {
+            client
+                .query_opt(
+                    "SELECT id FROM server_files WHERE user_email = $1 AND folder_id = $2 AND name = $3;",
+                    &[&user_email, &fid, &clean_name],
+                )
+                .await
+        }
+        None => {
+            client
+                .query_opt(
+                    "SELECT id FROM server_files WHERE user_email = $1 AND folder_id IS NULL AND name = $3;",
+                    &[&user_email, &clean_name],
+                )
+                .await
+        }
+    };
+
+    if let Ok(Some(_)) = existing {
+        return Err(format!("Файл с именем \"{}\" уже существует в этой папке", clean_name));
+    }
+
+    let text_content = content.unwrap_or_default();
+    let bytes = text_content.into_bytes();
+    let size_bytes = bytes.len() as i64;
+
+    let mime_type = if clean_name.ends_with(".txt") {
+        "text/plain"
+    } else if clean_name.ends_with(".md") {
+        "text/markdown"
+    } else if clean_name.ends_with(".json") {
+        "application/json"
+    } else if clean_name.ends_with(".html") || clean_name.ends_with(".htm") {
+        "text/html"
+    } else if clean_name.ends_with(".css") {
+        "text/css"
+    } else if clean_name.ends_with(".js") || clean_name.ends_with(".ts") {
+        "text/javascript"
+    } else if clean_name.ends_with(".csv") {
+        "text/csv"
+    } else if clean_name.ends_with(".xml") {
+        "application/xml"
+    } else {
+        "text/plain"
+    }.to_string();
+
+    let row = client
+        .query_one(
+            "INSERT INTO server_files (user_email, name, size_bytes, mime_type, content, folder_id) \
+             VALUES ($1, $2, $3, $4, $5, $6) \
+             RETURNING id, created_at;",
+            &[
+                &user_email,
+                &clean_name,
+                &size_bytes,
+                &Some(mime_type),
+                &Some(bytes),
+                &folder_id,
+            ],
+        )
+        .await
+        .map_err(|e| format!("Не удалось создать файл на сервере: {}", e))?;
+
+    let file_id: i64 = row.get(0);
+    let created_at: Option<chrono::DateTime<chrono::Utc>> = row.try_get(1).ok();
+    let date_str = created_at
+        .map(|dt| dt.format("%d.%m.%Y %H:%M").to_string())
+        .unwrap_or_else(|| "—".to_string());
+
+    // Save file to physical Linux filesystem on the server
+    let dir_path = resolve_folder_full_path(&client, user_email, folder_id).await;
+    let _ = fs_save_file(&client, file_id, &dir_path, clean_name).await;
+
+    Ok(StorageItemDto {
+        id: format!("file_{}", file_id),
+        name: clean_name.to_string(),
+        size_formatted: format_bytes(size_bytes.max(0) as u64),
+        size_bytes,
+        item_type: "file".to_string(),
+        folder_id,
+        modified: date_str,
+        user_email: user_email.to_string(),
+    })
+}
+
+pub async fn save_server_file_content(
+    user_email: &str,
+    file_id: i64,
+    content: &str,
+) -> Result<bool, String> {
+    let config = get_db_config();
+    let client = connect_to_db(&config).await?;
+
+    let bytes = content.as_bytes().to_vec();
+    let size_bytes = bytes.len() as i64;
+
+    let row = client
+        .query_opt(
+            "UPDATE server_files SET content = $1, size_bytes = $2, updated_at = CURRENT_TIMESTAMP \
+             WHERE id = $3 AND user_email = $4 RETURNING name, folder_id;",
+            &[&Some(bytes), &size_bytes, &file_id, &user_email],
+        )
+        .await
+        .map_err(|e| format!("Ошибка обновления файла: {}", e))?;
+
+    if let Some(r) = row {
+        let name: String = r.get(0);
+        let folder_id: Option<i64> = r.try_get(1).ok();
+        let dir_path = resolve_folder_full_path(&client, user_email, folder_id).await;
+        let _ = fs_save_file(&client, file_id, &dir_path, &name).await;
+        Ok(true)
+    } else {
+        Err("Файл не найден".to_string())
+    }
+}
+
 pub async fn download_server_file(user_email: &str, file_id: i64) -> Result<ServerFileDownloadDto, String> {
     let config = get_db_config();
     let client = connect_to_db(&config).await?;

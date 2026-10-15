@@ -89,6 +89,25 @@ async fn rename_server_item(user_email: String, item_id: String, new_name: Strin
 }
 
 #[tauri::command]
+async fn create_server_file(
+    user_email: String,
+    file_name: String,
+    content: Option<String>,
+    folder_id: Option<i64>,
+) -> Result<StorageItemDto, String> {
+    storage::create_server_file(&user_email, &file_name, content, folder_id).await
+}
+
+#[tauri::command]
+async fn save_server_file_content(
+    user_email: String,
+    file_id: i64,
+    content: String,
+) -> Result<bool, String> {
+    storage::save_server_file_content(&user_email, file_id, &content).await
+}
+
+#[tauri::command]
 async fn upload_server_file(
     user_email: String,
     file_name: String,
@@ -163,6 +182,8 @@ pub fn run() {
             get_storage_stats,
             list_storage_items,
             create_server_folder,
+            create_server_file,
+            save_server_file_content,
             delete_server_item,
             rename_server_item,
             upload_server_file,

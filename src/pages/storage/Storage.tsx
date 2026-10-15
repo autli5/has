@@ -4,6 +4,7 @@ import type { UserDto, StorageStats, StorageItemDto, ServerFileDownloadDto } fro
 import {
   FolderIcon,
   FileIcon,
+  FilePlusIcon,
   UploadIcon,
   DownloadIcon,
   TrashIcon,
@@ -45,6 +46,18 @@ export default function Storage({ currentUser }: StorageProps) {
   const [showCreateFolder, setShowCreateFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
   const [creatingFolder, setCreatingFolder] = useState(false);
+
+  // Create file modal state
+  const [showCreateFile, setShowCreateFile] = useState(false);
+  const [newFileName, setNewFileName] = useState("");
+  const [newFileContent, setNewFileContent] = useState("");
+  const [creatingFile, setCreatingFile] = useState(false);
+
+  // View / Edit file modal state
+  const [fileToEdit, setFileToEdit] = useState<StorageItemDto | null>(null);
+  const [editFileContent, setEditFileContent] = useState("");
+  const [savingFileContent, setSavingFileContent] = useState(false);
+  const [loadingFileContent, setLoadingFileContent] = useState(false);
 
   // Rename modal state
   const [itemToRename, setItemToRename] = useState<StorageItemDto | null>(null);
@@ -143,6 +156,133 @@ export default function Storage({ currentUser }: StorageProps) {
       showError(typeof err === "string" ? err : "Ошибка создания папки");
     } finally {
       setCreatingFolder(false);
+    }
+  };
+
+  // Helper to detect editable text files
+  const isTextFile = (name: string) => {
+    const lower = name.toLowerCase();
+    return (
+      lower.endsWith(".txt") ||
+      lower.endsWith(".md") ||
+      lower.endsWith(".json") ||
+      lower.endsWith(".html") ||
+      lower.endsWith(".css") ||
+      lower.endsWith(".js") ||
+      lower.endsWith(".ts") ||
+      lower.endsWith(".jsx") ||
+      lower.endsWith(".tsx") ||
+      lower.endsWith(".csv") ||
+      lower.endsWith(".xml") ||
+      lower.endsWith(".log") ||
+      lower.endsWith(".sh") ||
+      lower.endsWith(".py") ||
+      lower.endsWith(".rs") ||
+      lower.endsWith(".sql") ||
+      lower.endsWith(".env") ||
+      lower.endsWith(".yml") ||
+      lower.endsWith(".yaml")
+    );
+  };
+
+  // Create new file
+  const handleCreateFile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newFileName.trim()) return;
+
+    let finalName = newFileName.trim();
+    if (!finalName.includes(".")) {
+      finalName += ".txt";
+    }
+
+    setCreatingFile(true);
+    try {
+      await invoke("create_server_file", {
+        userEmail: currentUser.email,
+        fileName: finalName,
+        content: newFileContent,
+        folderId: currentFolderId,
+      });
+      setShowCreateFile(false);
+      setNewFileName("");
+      setNewFileContent("");
+      showSuccess(`Файл "${finalName}" создан на сервере`);
+      loadItems(currentFolderId);
+      loadStats();
+    } catch (err: unknown) {
+      showError(typeof err === "string" ? err : "Ошибка создания файла");
+    } finally {
+      setCreatingFile(false);
+    }
+  };
+
+  // Open file (text editor if text, download if binary)
+  const handleOpenFile = async (item: StorageItemDto) => {
+    if (item.item_type === "folder") {
+      handleOpenFolder(item);
+      return;
+    }
+
+    if (!isTextFile(item.name)) {
+      handleDownloadFile(item);
+      return;
+    }
+
+    const rawId = item.id.replace("file_", "");
+    const fileId = parseInt(rawId, 10);
+    if (isNaN(fileId)) return;
+
+    setLoadingFileContent(true);
+    setFileToEdit(item);
+    try {
+      const downloadData = await invoke<ServerFileDownloadDto>("download_server_file", {
+        userEmail: currentUser.email,
+        fileId,
+      });
+
+      if (downloadData.content_base64) {
+        const byteCharacters = atob(downloadData.content_base64);
+        const byteNumbers = new Uint8Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+          byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }
+        const text = new TextDecoder("utf-8").decode(byteNumbers);
+        setEditFileContent(text);
+      } else {
+        setEditFileContent("");
+      }
+    } catch (err: unknown) {
+      showError(typeof err === "string" ? err : "Не удалось открыть файл");
+      setFileToEdit(null);
+    } finally {
+      setLoadingFileContent(false);
+    }
+  };
+
+  // Save edited file content
+  const handleSaveFileContent = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!fileToEdit) return;
+
+    const rawId = fileToEdit.id.replace("file_", "");
+    const fileId = parseInt(rawId, 10);
+    if (isNaN(fileId)) return;
+
+    setSavingFileContent(true);
+    try {
+      await invoke("save_server_file_content", {
+        userEmail: currentUser.email,
+        fileId,
+        content: editFileContent,
+      });
+      setFileToEdit(null);
+      showSuccess(`Файл "${fileToEdit.name}" сохранён`);
+      loadItems(currentFolderId);
+      loadStats();
+    } catch (err: unknown) {
+      showError(typeof err === "string" ? err : "Ошибка сохранения файла");
+    } finally {
+      setSavingFileContent(false);
     }
   };
 
@@ -419,6 +559,19 @@ export default function Storage({ currentUser }: StorageProps) {
 
           <button
             type="button"
+            className="has-btn-new-file"
+            onClick={() => {
+              setNewFileName("");
+              setNewFileContent("");
+              setShowCreateFile(true);
+            }}
+          >
+            <FilePlusIcon className="w-4 h-4" width={16} height={16} />
+            <span>Создать файл</span>
+          </button>
+
+          <button
+            type="button"
             className="has-btn-icon-only"
             title="Обновить список"
             onClick={() => {
@@ -473,9 +626,12 @@ export default function Storage({ currentUser }: StorageProps) {
             <div
               key={item.id}
               className={`has-storage-card ${item.item_type === "folder" ? "is-folder" : ""}`}
+              style={{ cursor: "pointer" }}
               onClick={() => {
                 if (item.item_type === "folder") {
                   handleOpenFolder(item);
+                } else {
+                  handleOpenFile(item);
                 }
               }}
             >
@@ -502,6 +658,17 @@ export default function Storage({ currentUser }: StorageProps) {
                 className="has-storage-card-actions"
                 onClick={(e) => e.stopPropagation()}
               >
+                {item.item_type === "file" && isTextFile(item.name) && (
+                  <button
+                    type="button"
+                    className="has-item-action-btn"
+                    title="Открыть / Редактировать текст"
+                    onClick={() => handleOpenFile(item)}
+                  >
+                    <span style={{ fontSize: 13, fontWeight: 700 }}>📄</span>
+                  </button>
+                )}
+
                 {item.item_type === "file" && (
                   <button
                     type="button"
@@ -571,6 +738,90 @@ export default function Storage({ currentUser }: StorageProps) {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Create File Modal */}
+      {showCreateFile && (
+        <div className="has-modal-backdrop" onClick={() => setShowCreateFile(false)}>
+          <div className="has-modal-box" style={{ maxWidth: 520 }} onClick={(e) => e.stopPropagation()}>
+            <h3 className="has-modal-title">Создание нового файла</h3>
+            <form onSubmit={handleCreateFile} className="has-modal-body">
+              <label className="has-modal-label">Имя файла</label>
+              <input
+                type="text"
+                className="has-modal-input"
+                placeholder="Например: notes.txt, document.md, config.json..."
+                value={newFileName}
+                onChange={(e) => setNewFileName(e.target.value)}
+                autoFocus
+              />
+              <label className="has-modal-label">Содержимое файла (необязательно)</label>
+              <textarea
+                className="has-modal-textarea"
+                placeholder="Введите текст или оставьте поле пустым..."
+                value={newFileContent}
+                onChange={(e) => setNewFileContent(e.target.value)}
+              />
+              <div className="has-modal-actions">
+                <button
+                  type="button"
+                  className="has-btn-cancel"
+                  onClick={() => setShowCreateFile(false)}
+                >
+                  Отмена
+                </button>
+                <button
+                  type="submit"
+                  className="has-btn-primary-action"
+                  disabled={creatingFile || !newFileName.trim()}
+                >
+                  {creatingFile ? "Создание..." : "Создать файл"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* View/Edit File Modal */}
+      {fileToEdit && (
+        <div className="has-modal-backdrop" onClick={() => setFileToEdit(null)}>
+          <div className="has-modal-box" style={{ maxWidth: 640 }} onClick={(e) => e.stopPropagation()}>
+            <h3 className="has-modal-title">Редактирование: {fileToEdit.name}</h3>
+            {loadingFileContent ? (
+              <div style={{ textAlign: "center", padding: 30 }}>
+                <SpinnerIcon className="w-6 h-6" width={24} height={24} />
+                <div style={{ marginTop: 8, fontSize: 13, color: "#64748b" }}>Загрузка содержимого...</div>
+              </div>
+            ) : (
+              <form onSubmit={handleSaveFileContent} className="has-modal-body">
+                <textarea
+                  className="has-modal-textarea"
+                  style={{ minHeight: 240, fontFamily: "monospace", fontSize: 13 }}
+                  value={editFileContent}
+                  onChange={(e) => setEditFileContent(e.target.value)}
+                  autoFocus
+                />
+                <div className="has-modal-actions">
+                  <button
+                    type="button"
+                    className="has-btn-cancel"
+                    onClick={() => setFileToEdit(null)}
+                  >
+                    Закрыть
+                  </button>
+                  <button
+                    type="submit"
+                    className="has-btn-primary-action"
+                    disabled={savingFileContent}
+                  >
+                    {savingFileContent ? "Сохранение..." : "Сохранить изменения"}
+                  </button>
+                </div>
+              </form>
+            )}
           </div>
         </div>
       )}
