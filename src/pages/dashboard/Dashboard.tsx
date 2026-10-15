@@ -1,6 +1,6 @@
 import { useState } from "react";
-import type { UserDto, DbStatus, SafeDbInfo } from "../types";
-import logoUrl from "../assets/logo.png";
+import type { UserDto, DbStatus, SafeDbInfo } from "../../types";
+import logoUrl from "../../assets/logo.png";
 import {
   HomeNavIcon,
   TasksNavIcon,
@@ -10,13 +10,13 @@ import {
   HelpNavIcon,
   SearchIcon,
   LogOutIcon,
-} from "../components/Icons";
-import Home from "./Home";
-import Tasks from "./Tasks";
-import Users from "./Users";
-import Apis from "./Apis";
-import Settings from "./Settings";
-import Help from "./Help";
+} from "../../components/Icons";
+import Home from "../home/Home";
+import Tasks from "../tasks/Tasks";
+import Users from "../users/Users";
+import Apis from "../apis/Apis";
+import Settings from "../settings/Settings";
+import Help from "../help/Help";
 import "./Dashboard.css";
 
 interface DashboardProps {

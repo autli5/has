@@ -18,7 +18,7 @@ import { AuthResponse, DbStatus, ResetRequestResponse, SafeDbInfo, UserDto } fro
 import { OtpInput } from "./components/OtpInput";
 import { UpdaterBanner } from "./components/UpdaterBanner";
 import "./App.css";
-import Dashboard from "./pages/Dashboard";
+import Dashboard from "./pages/dashboard/Dashboard";
 
 const isTauri = () => {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;

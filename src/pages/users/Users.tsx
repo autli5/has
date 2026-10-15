@@ -1,4 +1,4 @@
-import type { UserDto } from "../types";
+import type { UserDto } from "../../types";
 import "./Users.css";
 
 interface UsersProps {

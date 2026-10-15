@@ -1,4 +1,4 @@
-import type { SafeDbInfo } from "../types";
+import type { SafeDbInfo } from "../../types";
 import "./Apis.css";
 
 interface ApisProps {

@@ -1,10 +1,10 @@
-import type { UserDto, DbStatus, SafeDbInfo } from "../types";
+import type { UserDto, DbStatus, SafeDbInfo } from "../../types";
 import {
   DatabaseIcon,
   CheckCircleIcon,
   TasksNavIcon,
   UsersNavIcon,
-} from "../components/Icons";
+} from "../../components/Icons";
 import "./Home.css";
 
 interface HomeProps {
