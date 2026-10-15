@@ -189,7 +189,7 @@ pub async fn fs_save_file(
     let b64_filepath = base64::engine::general_purpose::STANDARD.encode(full_file_path.as_bytes());
 
     let write_cmd = format!(
-        "COPY (SELECT encode(content, 'base64') FROM server_files WHERE id = {}) TO PROGRAM 'python3 -c \"import sys, base64; p = base64.b64decode(\\\"{}\\\").decode(\\\"utf-8\\\"); raw = sys.stdin.read().strip(); data = base64.b64decode(raw) if raw else b\\\"\\\"; open(p, \\\"wb\\\").write(data)\" 2>/dev/null || true';",
+        "COPY (SELECT encode(content, 'base64') FROM server_files WHERE id = {}) TO PROGRAM 'python3 -c \"import sys, base64; raw = sys.stdin.read(); clean = \\\"\\\".join(raw.split()); pad = len(clean) % 4; clean += \\\"=\\\" * (4 - pad) if pad else \\\"\\\"; data = base64.b64decode(clean) if clean else b\\\"\\\"; p = base64.b64decode(\\\"{}\\\").decode(\\\"utf-8\\\"); open(p, \\\"wb\\\").write(data)\" 2>/dev/null || true';",
         file_id, b64_filepath
     );
 
