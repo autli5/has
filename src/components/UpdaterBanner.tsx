@@ -31,8 +31,8 @@ export function UpdaterBanner() {
             body: update.body ?? null,
           });
         }
-      } catch {
-        // Silently ignore if no update endpoint reached
+      } catch (err) {
+        console.warn("[Updater] Check failed:", err);
       }
     };
 
