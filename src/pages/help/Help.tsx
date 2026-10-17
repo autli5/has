@@ -1,9 +1,19 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { getVersion } from "@tauri-apps/api/app";
 import "./Help.css";
 
 export default function Help() {
   const [checking, setChecking] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
+  const [appVersion, setAppVersion] = useState("v0.1.5");
+
+  useEffect(() => {
+    if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
+      getVersion()
+        .then((v) => setAppVersion(`v${v}`))
+        .catch(() => {});
+    }
+  }, []);
 
   const handleManualCheck = () => {
     setChecking(true);
@@ -33,7 +43,7 @@ export default function Help() {
           </div>
           <div className="has-detail-row">
             <span className="has-detail-key">Версия приложения:</span>
-            <span className="has-detail-val">v0.1.5 (Tauri 2 + React)</span>
+            <span className="has-detail-val">{appVersion} (Tauri 2 + React)</span>
           </div>
           <div className="has-detail-row" style={{ marginTop: "14px" }}>
             <button
