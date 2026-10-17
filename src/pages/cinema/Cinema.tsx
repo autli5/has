@@ -376,8 +376,78 @@ const formatMediaImg = (path: string | undefined, size: "w500" | "original" = "w
   return `https://wsrv.nl/?url=https://image.tmdb.org/t/p/${size}${path}`;
 };
 
+// Detect Android TV / Smart TV user agent or previous user preference
+const detectTvEnvironment = (): boolean => {
+  if (typeof window === "undefined") return false;
+  const saved = localStorage.getItem("has_tv_mode");
+  if (saved !== null) return saved === "true";
+  const ua = (navigator.userAgent || "").toLowerCase();
+  return (
+    ua.includes("android tv") ||
+    ua.includes("smarttv") ||
+    ua.includes("googletv") ||
+    ua.includes("tizen") ||
+    ua.includes("webos") ||
+    ua.includes("appletv") ||
+    ua.includes("crkey") ||
+    ua.includes("bravia") ||
+    ua.includes("aftt") ||
+    ua.includes("aftm")
+  );
+};
+
 export default function Cinema({ currentUser }: CinemaProps) {
   const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+
+  // Android TV / Remote Control (10-Foot UI) State
+  const [isTvMode, setIsTvMode] = useState<boolean>(detectTvEnvironment);
+  const [tvToast, setTvToast] = useState<{ text: string; icon?: string } | null>(null);
+  const tvToastTimerRef = useRef<any>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+
+  const showTvToast = useCallback((text: string, icon = "📺", duration = 2000) => {
+    if (tvToastTimerRef.current) clearTimeout(tvToastTimerRef.current);
+    setTvToast({ text, icon });
+    tvToastTimerRef.current = setTimeout(() => {
+      setTvToast(null);
+    }, duration);
+  }, []);
+
+  const playTvBeep = useCallback((freq = 580, duration = 0.035) => {
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      if (!audioCtxRef.current) {
+        audioCtxRef.current = new AudioCtx();
+      }
+      const ctx = audioCtxRef.current;
+      if (ctx.state === "suspended") {
+        ctx.resume().catch(() => {});
+      }
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(freq, ctx.currentTime);
+      gain.gain.setValueAtTime(0.04, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + duration);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + duration);
+    } catch {
+      // AudioContext might be blocked until user gesture, ignore safely
+    }
+  }, []);
+
+  const toggleTvMode = useCallback(() => {
+    setIsTvMode((prev) => {
+      const next = !prev;
+      localStorage.setItem("has_tv_mode", String(next));
+      showTvToast(next ? "ТВ-Режим включен (10-Foot UI)" : "ПК-Режим включен", "📺", 2500);
+      playTvBeep(next ? 750 : 400, 0.05);
+      return next;
+    });
+  }, [showTvToast, playTvBeep]);
 
   // Local Cinema State (Bookmarks & Progress saved on user's machine)
   const [cinemaState, setCinemaState] = useState<CinemaState>({
@@ -966,7 +1036,7 @@ export default function Cinema({ currentUser }: CinemaProps) {
   };
 
   // Close player and save exact position
-  const handleClosePlayer = () => {
+  const handleClosePlayer = useCallback(() => {
     const activeMedia = playingMedia || selectedMedia;
     if (isTauri && isFullscreen) {
       getCurrentWindow().setFullscreen(false).catch(() => {});
@@ -1005,7 +1075,245 @@ export default function Cinema({ currentUser }: CinemaProps) {
     setSelectedKodikLink(null);
     setRussianDubNotice(null);
     setAnilibriaStreamUrl(null);
-  };
+  }, [isTauri, isFullscreen, playingEpisode, playingMedia, selectedMedia, playingSeasonNumber]);
+
+  // D-Pad Spatial Navigation & TV Remote Key Handler
+  const handleRemoteKeyDown = useCallback(
+    (e: KeyboardEvent) => {
+      const isInput =
+        document.activeElement instanceof HTMLInputElement ||
+        document.activeElement instanceof HTMLTextAreaElement;
+
+      // Android TV / Remote key mappings
+      const isBack =
+        e.key === "Escape" ||
+        e.key === "GoBack" ||
+        e.key === "BrowserBack" ||
+        e.keyCode === 4 ||
+        e.keyCode === 27;
+      const isPlayPause =
+        e.key === "MediaPlayPause" || e.keyCode === 85 || e.keyCode === 179;
+      const isFastForward = e.key === "MediaFastForward" || e.keyCode === 90;
+      const isRewind = e.key === "MediaRewind" || e.keyCode === 89;
+
+      // F10 key toggles TV mode
+      if (e.key === "F10") {
+        e.preventDefault();
+        toggleTvMode();
+        return;
+      }
+
+      // 1. In-player remote control
+      if (playingEpisode !== null) {
+        if (isBack) {
+          e.preventDefault();
+          handleClosePlayer();
+          showTvToast("Плеер закрыт", "✕", 1500);
+          playTvBeep(400, 0.05);
+          return;
+        }
+
+        if (isPlayPause || (e.code === "Space" && !isInput)) {
+          e.preventDefault();
+          if (videoRef.current) {
+            if (videoRef.current.paused) {
+              videoRef.current.play().catch(() => {});
+              showTvToast("Воспроизведение", "▶", 1200);
+            } else {
+              videoRef.current.pause();
+              showTvToast("Пауза", "⏸", 1200);
+            }
+            playTvBeep(560, 0.04);
+          }
+          return;
+        }
+
+        if (
+          isFastForward ||
+          (e.key === "ArrowRight" &&
+            !isInput &&
+            !document.activeElement?.closest(".has-cinema-player-modal"))
+        ) {
+          if (videoRef.current) {
+            e.preventDefault();
+            videoRef.current.currentTime = Math.min(
+              videoRef.current.duration || 999999,
+              videoRef.current.currentTime + 10
+            );
+            showTvToast("+10 сек", "⏩", 1000);
+            playTvBeep(520, 0.03);
+            return;
+          }
+        }
+
+        if (
+          isRewind ||
+          (e.key === "ArrowLeft" &&
+            !isInput &&
+            !document.activeElement?.closest(".has-cinema-player-modal"))
+        ) {
+          if (videoRef.current) {
+            e.preventDefault();
+            videoRef.current.currentTime = Math.max(
+              0,
+              videoRef.current.currentTime - 10
+            );
+            showTvToast("-10 сек", "⏪", 1000);
+            playTvBeep(480, 0.03);
+            return;
+          }
+        }
+      }
+
+      // 2. Global Back button outside player
+      if (isBack) {
+        if (searchQuery.trim().length > 0) {
+          e.preventDefault();
+          setSearchQuery("");
+          showTvToast("Поиск очищен", "🔍", 1200);
+          playTvBeep(450, 0.04);
+          return;
+        }
+        if (activeTab !== "home") {
+          e.preventDefault();
+          setActiveTab("home");
+          showTvToast("Главный экран", "🏠", 1200);
+          playTvBeep(450, 0.04);
+          return;
+        }
+      }
+
+      // 3. D-Pad Directional Arrows Navigation
+      const isArrow =
+        ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key) ||
+        [19, 20, 21, 22, 37, 38, 39, 40].includes(e.keyCode);
+
+      if (isArrow) {
+        if (isInput && e.key !== "ArrowDown") {
+          return; // Let user type and navigate within text input
+        }
+
+        let direction: "up" | "down" | "left" | "right" = "down";
+        if (e.key === "ArrowUp" || e.keyCode === 19 || e.keyCode === 38)
+          direction = "up";
+        else if (
+          e.key === "ArrowDown" ||
+          e.keyCode === 20 ||
+          e.keyCode === 40
+        )
+          direction = "down";
+        else if (
+          e.key === "ArrowLeft" ||
+          e.keyCode === 21 ||
+          e.keyCode === 37
+        )
+          direction = "left";
+        else if (
+          e.key === "ArrowRight" ||
+          e.keyCode === 22 ||
+          e.keyCode === 39
+        )
+          direction = "right";
+
+        const focusables = Array.from(
+          document.querySelectorAll<HTMLElement>(
+            '[data-tv-focusable="true"], .has-cinema-nav-item, .has-cinema-btn-play, .has-cinema-btn-bookmark, .has-cinema-search-input, .has-cinema-media-card, .has-cinema-grid-card, .has-cinema-episode-card, .has-cinema-player-nav-btn, .has-cinema-mode-btn, .has-cinema-russian-dub-btn, .has-cinema-player-fs-btn, .has-cinema-player-close-btn, .has-cinema-mirror-btn, .has-cinema-trans-btn, .has-cinema-player-ep-chip, .has-cinema-season-tab, .has-cinema-tv-mode-btn'
+          )
+        ).filter((el) => {
+          const r = el.getBoundingClientRect();
+          if (r.width === 0 || r.height === 0) return false;
+          const style = window.getComputedStyle(el);
+          return (
+            style.display !== "none" &&
+            style.visibility !== "hidden" &&
+            style.opacity !== "0"
+          );
+        });
+
+        if (focusables.length === 0) return;
+
+        const current = document.activeElement as HTMLElement | null;
+        if (!current || !focusables.includes(current)) {
+          const initial =
+            focusables.find((el) => el.classList.contains("has-cinema-btn-play")) ||
+            focusables.find((el) => el.classList.contains("has-cinema-nav-item")) ||
+            focusables[0];
+          if (initial) {
+            e.preventDefault();
+            initial.focus();
+            initial.scrollIntoView({
+              behavior: "smooth",
+              block: "center",
+              inline: "center",
+            });
+            playTvBeep(580, 0.03);
+          }
+          return;
+        }
+
+        const curRect = current.getBoundingClientRect();
+        const curCx = curRect.left + curRect.width / 2;
+        const curCy = curRect.top + curRect.height / 2;
+
+        let bestEl: HTMLElement | null = null;
+        let minScore = Infinity;
+
+        for (const candidate of focusables) {
+          if (candidate === current) continue;
+          const cRect = candidate.getBoundingClientRect();
+          const cCx = cRect.left + cRect.width / 2;
+          const cCy = cRect.top + cRect.height / 2;
+
+          const dx = cCx - curCx;
+          const dy = cCy - curCy;
+
+          if (direction === "up" && dy >= -8) continue;
+          if (direction === "down" && dy <= 8) continue;
+          if (direction === "left" && dx >= -8) continue;
+          if (direction === "right" && dx <= 8) continue;
+
+          let score = Infinity;
+          if (direction === "up" || direction === "down") {
+            score = Math.abs(dy) + Math.abs(dx) * 1.7;
+          } else {
+            score = Math.abs(dx) + Math.abs(dy) * 2.4;
+          }
+
+          if (score < minScore) {
+            minScore = score;
+            bestEl = candidate;
+          }
+        }
+
+        if (bestEl) {
+          e.preventDefault();
+          bestEl.focus();
+          bestEl.scrollIntoView({
+            behavior: "smooth",
+            block: "nearest",
+            inline: "nearest",
+          });
+          playTvBeep(640, 0.025);
+        }
+      }
+    },
+    [
+      playingEpisode,
+      searchQuery,
+      activeTab,
+      handleClosePlayer,
+      showTvToast,
+      playTvBeep,
+      toggleTvMode,
+    ]
+  );
+
+  useEffect(() => {
+    window.addEventListener("keydown", handleRemoteKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleRemoteKeyDown);
+    };
+  }, [handleRemoteKeyDown]);
 
   // Toggle Desktop Fullscreen mode
   const handleToggleFullscreen = async () => {
@@ -1250,7 +1558,7 @@ export default function Cinema({ currentUser }: CinemaProps) {
   ].filter((item, index, self) => cinemaState.bookmarks.includes(item.id) && self.findIndex((s) => s.id === item.id) === index);
 
   return (
-    <div className="has-cinema-container" ref={topRef}>
+    <div className={`has-cinema-container ${isTvMode ? "has-tv-mode" : ""}`} ref={topRef}>
       {/* ========================================================
           1. TOP NAVIGATION BAR (All categories & search)
           ======================================================== */}
@@ -1263,6 +1571,7 @@ export default function Cinema({ currentUser }: CinemaProps) {
               setActiveTab("home");
               setSearchQuery("");
             }}
+            data-tv-focusable="true"
           >
             Главная
           </button>
@@ -1273,6 +1582,7 @@ export default function Cinema({ currentUser }: CinemaProps) {
               setActiveTab("movies");
               setSearchQuery("");
             }}
+            data-tv-focusable="true"
           >
             Фильмы
           </button>
@@ -1283,6 +1593,7 @@ export default function Cinema({ currentUser }: CinemaProps) {
               setActiveTab("series");
               setSearchQuery("");
             }}
+            data-tv-focusable="true"
           >
             Сериалы
           </button>
@@ -1293,6 +1604,7 @@ export default function Cinema({ currentUser }: CinemaProps) {
               setActiveTab("anime");
               setSearchQuery("");
             }}
+            data-tv-focusable="true"
           >
             Аниме
           </button>
@@ -1303,12 +1615,24 @@ export default function Cinema({ currentUser }: CinemaProps) {
               setActiveTab("bookmarks");
               setSearchQuery("");
             }}
+            data-tv-focusable="true"
           >
             Мой список {cinemaState.bookmarks.length > 0 && `(${cinemaState.bookmarks.length})`}
           </button>
         </nav>
 
         <div className="has-cinema-header-right">
+          {/* Android TV 10-Foot Mode Switcher Button */}
+          <button
+            type="button"
+            className={`has-cinema-tv-mode-btn ${isTvMode ? "active" : ""}`}
+            onClick={toggleTvMode}
+            title={isTvMode ? "Выключить ТВ-режим (Для мыши)" : "Включить ТВ-режим (Для пульта ДУ Android TV)"}
+            data-tv-focusable="true"
+          >
+            {isTvMode ? "📺 ТВ-Режим: ВКЛ" : "📺 ТВ-Режим"}
+          </button>
+
           {/* Universal Search Box */}
           <div className="has-cinema-search-wrapper">
             <div className="has-cinema-search-box">
@@ -1322,6 +1646,7 @@ export default function Cinema({ currentUser }: CinemaProps) {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="has-cinema-search-input"
+                data-tv-focusable="true"
               />
               {isSearching && <span className="has-cinema-search-spinner" />}
               {searchQuery && (
@@ -1329,6 +1654,7 @@ export default function Cinema({ currentUser }: CinemaProps) {
                   type="button"
                   className="has-cinema-search-clear-btn"
                   onClick={() => setSearchQuery("")}
+                  data-tv-focusable="true"
                 >
                   ✕
                 </button>
@@ -1377,6 +1703,15 @@ export default function Cinema({ currentUser }: CinemaProps) {
                   key={item.id}
                   className="has-cinema-grid-card"
                   onClick={() => handleMediaCardClick(item)}
+                  data-tv-focusable="true"
+                  tabIndex={0}
+                  role="button"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " " || e.keyCode === 23 || e.keyCode === 66) {
+                      e.preventDefault();
+                      handleMediaCardClick(item);
+                    }
+                  }}
                 >
                   <div className="has-cinema-media-thumb-box">
                     <img src={item.poster_url} alt={item.title} className="has-cinema-media-thumb" loading="lazy" />
@@ -1446,6 +1781,7 @@ export default function Cinema({ currentUser }: CinemaProps) {
                   type="button"
                   className="has-cinema-btn-play"
                   onClick={handleHeroPlay}
+                  data-tv-focusable="true"
                 >
                   <svg width={18} height={18} viewBox="0 0 24 24" fill="currentColor">
                     <path d="M8 5v14l11-7z" />
@@ -1460,6 +1796,7 @@ export default function Cinema({ currentUser }: CinemaProps) {
                   className={`has-cinema-btn-circle ${isBookmarked ? "bookmarked" : ""}`}
                   onClick={handleToggleBookmark}
                   title={isBookmarked ? "Удалить из списка" : "Добавить в список"}
+                  data-tv-focusable="true"
                 >
                   {isBookmarked ? "✓" : "+"}
                 </button>
@@ -1473,6 +1810,7 @@ export default function Cinema({ currentUser }: CinemaProps) {
                       `Тайтл: ${selectedMedia.title} (${selectedMedia.release_year})\nЖанр: ${selectedMedia.genre}\nРейтинг: ${selectedMedia.rating}\nЛокальный файл: cinema_state.json`
                     )
                   }
+                  data-tv-focusable="true"
                 >
                   ⓘ
                 </button>
@@ -1499,6 +1837,7 @@ export default function Cinema({ currentUser }: CinemaProps) {
                         loadTvSeasonsDetails(selectedMedia.tmdb_id, season.season_number);
                       }
                     }}
+                    data-tv-focusable="true"
                   >
                     Season {season.season_number}
                   </button>
@@ -1514,6 +1853,15 @@ export default function Cinema({ currentUser }: CinemaProps) {
                       key={ep.id}
                       className="has-cinema-episode-card"
                       onClick={() => handlePlayEpisode(selectedSeason, ep)}
+                      data-tv-focusable="true"
+                      tabIndex={0}
+                      role="button"
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " " || e.keyCode === 23 || e.keyCode === 66) {
+                          e.preventDefault();
+                          handlePlayEpisode(selectedSeason, ep);
+                        }
+                      }}
                       title={`Смотреть: Сезон ${selectedSeason}, Серия ${ep.number} — ${ep.title}`}
                     >
                       <div className="has-cinema-ep-thumb-box">
@@ -1585,6 +1933,23 @@ export default function Cinema({ currentUser }: CinemaProps) {
                             handleMediaCardClick(found);
                           }
                         }}
+                        data-tv-focusable="true"
+                        tabIndex={0}
+                        role="button"
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " " || e.keyCode === 23 || e.keyCode === 66) {
+                            e.preventDefault();
+                            const found = [
+                              ...allTrending,
+                              ...allMoviesList,
+                              ...allSeriesList,
+                              ...allAnimeList,
+                            ].find((item) => item.id === h.title_id);
+                            if (found) {
+                              handleMediaCardClick(found);
+                            }
+                          }
+                        }}
                       >
                         <div className="has-cinema-media-thumb-box">
                           <img
@@ -1626,6 +1991,15 @@ export default function Cinema({ currentUser }: CinemaProps) {
                       key={item.id}
                       className="has-cinema-media-card"
                       onClick={() => handleMediaCardClick(item)}
+                      data-tv-focusable="true"
+                      tabIndex={0}
+                      role="button"
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " " || e.keyCode === 23 || e.keyCode === 66) {
+                          e.preventDefault();
+                          handleMediaCardClick(item);
+                        }
+                      }}
                     >
                       <div className="has-cinema-media-thumb-box">
                         <img src={item.poster_url} alt={item.title} className="has-cinema-media-thumb" loading="lazy" />
@@ -1658,6 +2032,15 @@ export default function Cinema({ currentUser }: CinemaProps) {
                       key={movie.id}
                       className={activeTab === "movies" ? "has-cinema-grid-card" : "has-cinema-media-card"}
                       onClick={() => handleMediaCardClick(movie)}
+                      data-tv-focusable="true"
+                      tabIndex={0}
+                      role="button"
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " " || e.keyCode === 23 || e.keyCode === 66) {
+                          e.preventDefault();
+                          handleMediaCardClick(movie);
+                        }
+                      }}
                     >
                       <div className="has-cinema-media-thumb-box">
                         <img src={movie.poster_url} alt={movie.title} className="has-cinema-media-thumb" loading="lazy" />
@@ -1690,6 +2073,15 @@ export default function Cinema({ currentUser }: CinemaProps) {
                       key={series.id}
                       className={activeTab === "series" ? "has-cinema-grid-card" : "has-cinema-media-card"}
                       onClick={() => handleMediaCardClick(series)}
+                      data-tv-focusable="true"
+                      tabIndex={0}
+                      role="button"
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " " || e.keyCode === 23 || e.keyCode === 66) {
+                          e.preventDefault();
+                          handleMediaCardClick(series);
+                        }
+                      }}
                     >
                       <div className="has-cinema-media-thumb-box">
                         <img src={series.poster_url} alt={series.title} className="has-cinema-media-thumb" loading="lazy" />
@@ -1722,6 +2114,15 @@ export default function Cinema({ currentUser }: CinemaProps) {
                       key={anime.id}
                       className={activeTab === "anime" ? "has-cinema-grid-card" : "has-cinema-media-card"}
                       onClick={() => handleMediaCardClick(anime)}
+                      data-tv-focusable="true"
+                      tabIndex={0}
+                      role="button"
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " " || e.keyCode === 23 || e.keyCode === 66) {
+                          e.preventDefault();
+                          handleMediaCardClick(anime);
+                        }
+                      }}
                     >
                       <div className="has-cinema-media-thumb-box">
                         <img src={anime.poster_url} alt={anime.title} className="has-cinema-media-thumb" loading="lazy" />
@@ -1760,6 +2161,15 @@ export default function Cinema({ currentUser }: CinemaProps) {
                         key={item.id}
                         className="has-cinema-grid-card"
                         onClick={() => handleMediaCardClick(item)}
+                        data-tv-focusable="true"
+                        tabIndex={0}
+                        role="button"
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " " || e.keyCode === 23 || e.keyCode === 66) {
+                            e.preventDefault();
+                            handleMediaCardClick(item);
+                          }
+                        }}
                       >
                         <div className="has-cinema-media-thumb-box">
                           <img src={item.poster_url} alt={item.title} className="has-cinema-media-thumb" loading="lazy" />
@@ -1808,6 +2218,7 @@ export default function Cinema({ currentUser }: CinemaProps) {
                   disabled={playingEpisode.number <= 1}
                   onClick={handlePrevEpisode}
                   title="Предыдущая серия"
+                  data-tv-focusable="true"
                 >
                   ◀ Пред.
                 </button>
@@ -1816,6 +2227,7 @@ export default function Cinema({ currentUser }: CinemaProps) {
                   className="has-cinema-player-nav-btn"
                   onClick={handleNextEpisode}
                   title="Следующая серия"
+                  data-tv-focusable="true"
                 >
                   След. ▶
                 </button>
@@ -1828,6 +2240,7 @@ export default function Cinema({ currentUser }: CinemaProps) {
                 className={`has-cinema-mode-btn ${playerMode === "balancer" ? "active" : ""}`}
                 onClick={() => setPlayerMode("balancer")}
                 title="Онлайн плеер с возможностью выбора проверенных зеркал"
+                data-tv-focusable="true"
               >
                 Онлайн Плеер
               </button>
@@ -1835,6 +2248,7 @@ export default function Cinema({ currentUser }: CinemaProps) {
                 type="button"
                 className={`has-cinema-mode-btn ${playerMode === "direct" ? "active" : ""}`}
                 onClick={() => setPlayerMode("direct")}
+                data-tv-focusable="true"
               >
                 Прямой поток
               </button>
@@ -1851,6 +2265,7 @@ export default function Cinema({ currentUser }: CinemaProps) {
                 }`}
                 onClick={handleActivateRussianDubbing}
                 title="Русская озвучка активна. Нажмите для переключения серверов и студий озвучки."
+                data-tv-focusable="true"
               >
                 {isLoadingAniLibria || isSearchingKodik
                   ? "⏳ Подключение..."
@@ -1867,6 +2282,7 @@ export default function Cinema({ currentUser }: CinemaProps) {
                 className="has-cinema-player-fs-btn"
                 onClick={handleToggleFullscreen}
                 title={isFullscreen ? "Выйти из полноэкранного режима" : "Развернуть во весь экран"}
+                data-tv-focusable="true"
               >
                 {isFullscreen ? "🗗 В окно" : "⛶ Во весь экран"}
               </button>
@@ -1881,6 +2297,7 @@ export default function Cinema({ currentUser }: CinemaProps) {
                   }
                 }}
                 title="Открыть видео во внешнем браузере"
+                data-tv-focusable="true"
               >
                 ↗ В браузере
               </button>
@@ -1891,6 +2308,7 @@ export default function Cinema({ currentUser }: CinemaProps) {
               className="has-cinema-player-close-btn"
               onClick={handleClosePlayer}
               title="Закрыть плеер"
+              data-tv-focusable="true"
             >
               ✕
             </button>
@@ -1907,6 +2325,7 @@ export default function Cinema({ currentUser }: CinemaProps) {
                   className={`has-cinema-mirror-btn ${selectedMirror === m.id ? "active" : ""}`}
                   onClick={() => handleSelectMirror(m.id)}
                   title={m.note}
+                  data-tv-focusable="true"
                 >
                   {m.label}
                 </button>
@@ -1929,6 +2348,7 @@ export default function Cinema({ currentUser }: CinemaProps) {
                       setSelectedMirror("kodik_ru");
                     }}
                     title={item.title}
+                    data-tv-focusable="true"
                   >
                     {item.translation.title || "Озвучка"}
                   </button>
@@ -1940,6 +2360,17 @@ export default function Cinema({ currentUser }: CinemaProps) {
           {russianDubNotice && (
             <div className="has-cinema-dub-notice">
               {russianDubNotice}
+            </div>
+          )}
+
+          {/* In-Player TV Remote Guide Overlay */}
+          {isTvMode && (
+            <div className="has-cinema-player-tv-guide">
+              <span>[OK / Пауза] Воспроизведение</span>
+              <span>•</span>
+              <span>[◀ / ▶] Перемотка ±10 сек</span>
+              <span>•</span>
+              <span>[Назад / Esc] Закрыть плеер</span>
             </div>
           )}
 
@@ -2004,6 +2435,7 @@ export default function Cinema({ currentUser }: CinemaProps) {
                       startPlayback(playingMedia || selectedMedia, playingSeasonNumber, ep)
                     }
                     title={ep.title}
+                    data-tv-focusable="true"
                   >
                     {ep.number}
                   </button>
@@ -2017,6 +2449,38 @@ export default function Cinema({ currentUser }: CinemaProps) {
               🎬 <strong>Основной плеер:</strong> <strong>VidSrc Pro</strong> и <strong>VidLink Pro</strong> воспроизводят любые фильмы, сериалы и аниме без блокировок. Для переключения студийных озвучек нажмите <strong>«🇷🇺 Включить русскую озвучку»</strong> или выберите зеркало выше.
             </span>
           </div>
+        </div>
+      )}
+
+      {/* ========================================================
+          6. ANDROID TV REMOTE CONTROL GUIDE & ON-SCREEN TOAST
+          ======================================================== */}
+      {isTvMode && (
+        <div className="has-cinema-tv-remote-guide">
+          <div className="has-cinema-tv-guide-item">
+            <span className="has-cinema-tv-key">▲ ▼ ◀ ▶</span>
+            <span>Навигация</span>
+          </div>
+          <div className="has-cinema-tv-guide-item">
+            <span className="has-cinema-tv-key">OK</span>
+            <span>Выбрать</span>
+          </div>
+          <div className="has-cinema-tv-guide-item">
+            <span className="has-cinema-tv-key">Back</span>
+            <span>Назад</span>
+          </div>
+          <div className="has-cinema-tv-guide-item">
+            <span className="has-cinema-tv-key">F10</span>
+            <span>ТВ-режим</span>
+          </div>
+        </div>
+      )}
+
+      {/* High-visibility TV On-Screen Toast */}
+      {tvToast && (
+        <div className="has-cinema-tv-toast">
+          <span className="has-cinema-tv-toast-icon">{tvToast.icon || "📺"}</span>
+          <span className="has-cinema-tv-toast-text">{tvToast.text}</span>
         </div>
       )}
     </div>

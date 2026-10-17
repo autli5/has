@@ -1348,4 +1348,234 @@
   transform: translateY(-1px);
 }
 
+/* ========================================================
+   6. ANDROID TV & REMOTE CONTROL (10-FOOT UI) STYLES
+   ======================================================== */
+
+/* Header TV Mode Switcher Button */
+.has-cinema-tv-mode-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 9999px;
+  color: #cbd5e1;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.has-cinema-tv-mode-btn:hover {
+  background: rgba(255, 255, 255, 0.16);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.35);
+}
+
+.has-cinema-tv-mode-btn.active {
+  background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+  border-color: #818cf8;
+  color: #ffffff;
+  box-shadow: 0 0 16px rgba(99, 102, 241, 0.6);
+}
+
+/* Universal Glowing Focus Indicators for D-Pad / Keyboard Navigation */
+[data-tv-focusable="true"]:focus-visible,
+.has-cinema-media-card:focus-visible,
+.has-cinema-grid-card:focus-visible,
+.has-cinema-episode-card:focus-visible,
+.has-cinema-nav-item:focus-visible,
+.has-cinema-btn-play:focus-visible,
+.has-cinema-btn-circle:focus-visible,
+.has-cinema-season-tab:focus-visible,
+.has-cinema-mirror-btn:focus-visible,
+.has-cinema-trans-btn:focus-visible,
+.has-cinema-player-nav-btn:focus-visible,
+.has-cinema-mode-btn:focus-visible,
+.has-cinema-russian-dub-btn:focus-visible,
+.has-cinema-player-fs-btn:focus-visible,
+.has-cinema-player-close-btn:focus-visible,
+.has-cinema-player-ep-chip:focus-visible,
+.has-cinema-tv-mode-btn:focus-visible,
+.has-cinema-search-input:focus-visible,
+.has-cinema-search-clear-btn:focus-visible {
+  outline: 3.5px solid #6366f1 !important;
+  outline-offset: 3px !important;
+  box-shadow: 0 0 25px rgba(99, 102, 241, 0.9), inset 0 0 8px rgba(99, 102, 241, 0.4) !important;
+  transform: scale(1.05) !important;
+  z-index: 35 !important;
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s ease, outline-color 0.2s ease !important;
+}
+
+/* TV Mode Root Overrides (10-Foot UI for 3m Couch Distance) */
+.has-tv-mode {
+  font-size: 16px;
+}
+
+.has-tv-mode .has-cinema-nav-item {
+  font-size: 16.5px;
+  padding: 8px 12px;
+}
+
+.has-tv-mode .has-cinema-hero-title {
+  font-size: 42px;
+}
+
+.has-tv-mode .has-cinema-hero-synopsis {
+  font-size: 16px;
+  max-width: 720px;
+  line-height: 1.6;
+}
+
+.has-tv-mode .has-cinema-btn-play {
+  padding: 12px 28px;
+  font-size: 16px;
+}
+
+.has-tv-mode .has-cinema-row-title {
+  font-size: 22px;
+  margin-bottom: 16px;
+}
+
+.has-tv-mode .has-cinema-media-card {
+  width: 195px;
+  transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.22s ease;
+}
+
+.has-tv-mode .has-cinema-media-card:focus,
+.has-tv-mode .has-cinema-grid-card:focus,
+.has-tv-mode .has-cinema-episode-card:focus {
+  outline: 4px solid #818cf8 !important;
+  outline-offset: 4px !important;
+  box-shadow: 0 0 35px rgba(129, 140, 248, 0.95), 0 12px 28px rgba(0, 0, 0, 0.8) !important;
+  transform: scale(1.09) translateY(-6px) !important;
+  z-index: 40 !important;
+}
+
+.has-tv-mode .has-cinema-media-title {
+  font-size: 15px;
+}
+
+.has-tv-mode .has-cinema-media-sub {
+  font-size: 13px;
+}
+
+/* In-Player TV Remote Guide */
+.has-cinema-player-tv-guide {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 8px 20px;
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  margin: 6px auto 10px;
+  color: #cbd5e1;
+  font-size: 13px;
+  font-weight: 500;
+  max-width: 600px;
+}
+
+.has-cinema-player-tv-guide span {
+  white-space: nowrap;
+}
+
+/* Floating Bottom TV Remote Navigation Guide */
+.has-cinema-tv-remote-guide {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 9px 26px;
+  background: rgba(10, 15, 28, 0.92);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 9999px;
+  z-index: 9999;
+  box-shadow: 0 10px 35px rgba(0, 0, 0, 0.7);
+  animation: fadeInGuide 0.3s ease;
+  pointer-events: none;
+}
+
+.has-cinema-tv-guide-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #94a3b8;
+  font-weight: 500;
+}
+
+.has-cinema-tv-key {
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 6px;
+  padding: 3px 8px;
+  color: #f8fafc;
+  font-family: monospace;
+  font-size: 11.5px;
+  font-weight: 700;
+}
+
+@keyframes fadeInGuide {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 15px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+/* High-Visibility Floating On-Screen TV Toast */
+.has-cinema-tv-toast {
+  position: fixed;
+  top: 36px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 28px;
+  background: rgba(15, 23, 42, 0.96);
+  backdrop-filter: blur(18px);
+  border: 1.5px solid #6366f1;
+  border-radius: 9999px;
+  color: #ffffff;
+  font-size: 15.5px;
+  font-weight: 600;
+  z-index: 99999;
+  box-shadow: 0 10px 40px rgba(99, 102, 241, 0.45), 0 0 25px rgba(0, 0, 0, 0.8);
+  animation: popTvToast 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  pointer-events: none;
+}
+
+.has-cinema-tv-toast-icon {
+  font-size: 22px;
+}
+
+.has-cinema-tv-toast-text {
+  letter-spacing: 0.2px;
+}
+
+@keyframes popTvToast {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -20px) scale(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
+}
+
+
 
