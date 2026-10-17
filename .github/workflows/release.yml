@@ -103,16 +103,36 @@ jobs:
         run: |
           echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
           if [ -d "$ANDROID_SDK_ROOT/ndk/26.1.10909125" ]; then
-            echo "NDK_HOME=$ANDROID_SDK_ROOT/ndk/26.1.10909125" >> $GITHUB_ENV
+            NDK_PATH="$ANDROID_SDK_ROOT/ndk/26.1.10909125"
           else
             NDK_LATEST=$(ls -d $ANDROID_SDK_ROOT/ndk/* 2>/dev/null | tail -n 1 || true)
             if [ -n "$NDK_LATEST" ]; then
-              echo "NDK_HOME=$NDK_LATEST" >> $GITHUB_ENV
+              NDK_PATH="$NDK_LATEST"
             else
               echo "y" | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "ndk;26.1.10909125"
-              echo "NDK_HOME=$ANDROID_SDK_ROOT/ndk/26.1.10909125" >> $GITHUB_ENV
+              NDK_PATH="$ANDROID_SDK_ROOT/ndk/26.1.10909125"
             fi
           fi
+          echo "NDK_HOME=$NDK_PATH" >> $GITHUB_ENV
+          
+          TOOLCHAIN="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64"
+          echo "TOOLCHAIN=$TOOLCHAIN" >> $GITHUB_ENV
+          echo "$TOOLCHAIN/bin" >> $GITHUB_PATH
+          
+          # Create symlinks for legacy GNU binutils expected by OpenSSL makefile
+          for prefix in aarch64-linux-android arm-linux-androideabi armv7a-linux-androideabi; do
+            sudo ln -sf "$TOOLCHAIN/bin/llvm-ar" "/usr/local/bin/${prefix}-ar"
+            sudo ln -sf "$TOOLCHAIN/bin/llvm-ranlib" "/usr/local/bin/${prefix}-ranlib"
+            sudo ln -sf "$TOOLCHAIN/bin/llvm-nm" "/usr/local/bin/${prefix}-nm"
+            sudo ln -sf "$TOOLCHAIN/bin/llvm-as" "/usr/local/bin/${prefix}-as"
+            sudo ln -sf "$TOOLCHAIN/bin/llvm-strip" "/usr/local/bin/${prefix}-strip"
+            
+            sudo ln -sf "$TOOLCHAIN/bin/llvm-ar" "$TOOLCHAIN/bin/${prefix}-ar"
+            sudo ln -sf "$TOOLCHAIN/bin/llvm-ranlib" "$TOOLCHAIN/bin/${prefix}-ranlib"
+            sudo ln -sf "$TOOLCHAIN/bin/llvm-nm" "$TOOLCHAIN/bin/${prefix}-nm"
+            sudo ln -sf "$TOOLCHAIN/bin/llvm-as" "$TOOLCHAIN/bin/${prefix}-as"
+            sudo ln -sf "$TOOLCHAIN/bin/llvm-strip" "$TOOLCHAIN/bin/${prefix}-strip"
+          done
 
       - name: Install dependencies
         run: npm install
@@ -122,10 +142,15 @@ jobs:
         env:
           NDK_HOME: ${{ env.NDK_HOME }}
           OPENSSL_STATIC: "1"
+          AR_aarch64_linux_android: llvm-ar
+          RANLIB_aarch64_linux_android: llvm-ranlib
+          AR_armv7_linux_androideabi: llvm-ar
+          RANLIB_armv7_linux_androideabi: llvm-ranlib
 
       - name: Upload APK to GitHub Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -e
           RELEASE_TAG="${{ inputs.tag || github.ref_name }}"
@@ -149,4 +174,7 @@ jobs:
           fi
           
           echo "Uploading APK assets to GitHub release $RELEASE_TAG..."
+          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" --title "Home Autli Server $RELEASE_TAG" --notes "Release $RELEASE_TAG"
+          fi
           gh release upload "$RELEASE_TAG" dist-apk/*.apk --clobber
