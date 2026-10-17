@@ -30,16 +30,32 @@ export function UpdaterBanner() {
             version: update.version,
             body: update.body ?? null,
           });
+          setDismissed(false);
         }
       } catch (err) {
         console.warn("[Updater] Check failed:", err);
       }
     };
 
-    const timer = setTimeout(checkForUpdates, 3000);
+    // 1. Initial check after startup
+    const timer = setTimeout(checkForUpdates, 800);
+
+    // 2. Periodic check every 60 seconds while app is running
+    const interval = setInterval(checkForUpdates, 60 * 1000);
+
+    // 3. Check whenever window gains focus
+    const handleFocus = () => checkForUpdates();
+    window.addEventListener("focus", handleFocus);
+
+    // 4. Custom event for manual checks from UI
+    window.addEventListener("has-check-update", handleFocus);
+
     return () => {
       cancelled = true;
       clearTimeout(timer);
+      clearInterval(interval);
+      window.removeEventListener("focus", handleFocus);
+      window.removeEventListener("has-check-update", handleFocus);
     };
   }, []);
 
