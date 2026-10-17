@@ -4,9 +4,16 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Target Release Tag (e.g. v0.1.5)'
+        required: false
+        default: 'v0.1.5'
 
 jobs:
   release:
+    if: github.event_name == 'push'
     permissions:
       contents: write
     strategy:
@@ -60,7 +67,85 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'Home Autli Server ${{ github.ref_name }}'
-          releaseBody: 'Автоматический релиз для Linux (.deb, .rpm, .AppImage), Windows (.exe) и macOS (.dmg).'
+          releaseBody: 'Автоматический релиз для Android (.apk), Linux (.deb, .rpm, .AppImage), Windows (.exe) и macOS (.dmg).'
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.target && format('--target {0}', matrix.target) || '' }}
+
+  release-android:
+    needs: release
+    if: always() && (needs.release.result == 'success' || needs.release.result == 'skipped')
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Setup Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi
+
+      - name: Setup Android NDK
+        run: |
+          echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+          if [ -d "$ANDROID_SDK_ROOT/ndk/26.1.10909125" ]; then
+            echo "NDK_HOME=$ANDROID_SDK_ROOT/ndk/26.1.10909125" >> $GITHUB_ENV
+          else
+            NDK_LATEST=$(ls -d $ANDROID_SDK_ROOT/ndk/* 2>/dev/null | tail -n 1 || true)
+            if [ -n "$NDK_LATEST" ]; then
+              echo "NDK_HOME=$NDK_LATEST" >> $GITHUB_ENV
+            else
+              echo "y" | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "ndk;26.1.10909125"
+              echo "NDK_HOME=$ANDROID_SDK_ROOT/ndk/26.1.10909125" >> $GITHUB_ENV
+            fi
+          fi
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build Android APK
+        run: npm run tauri -- android build --apk --target aarch64 armv7
+        env:
+          NDK_HOME: ${{ env.NDK_HOME }}
+
+      - name: Upload APK to GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          RELEASE_TAG="${{ inputs.tag || github.ref_name }}"
+          echo "Target Release Tag is: $RELEASE_TAG"
+          
+          mkdir -p dist-apk
+          for apk in $(find src-tauri/gen/android/app/build/outputs/apk -type f -name "*.apk"); do
+            filename=$(basename "$apk")
+            echo "Found APK: $apk ($filename)"
+            cp "$apk" "dist-apk/Home.Autli.Server_${RELEASE_TAG}_${filename}"
+            if [[ "$filename" == *"universal"* ]] || [[ "$filename" == *"release"* ]]; then
+              cp "$apk" "dist-apk/Home.Autli.Server_${RELEASE_TAG}.apk"
+            fi
+          done
+          
+          if [ ! -f "dist-apk/Home.Autli.Server_${RELEASE_TAG}.apk" ]; then
+            first_apk=$(find dist-apk -type f -name "*.apk" | head -n 1)
+            if [ -n "$first_apk" ]; then
+              cp "$first_apk" "dist-apk/Home.Autli.Server_${RELEASE_TAG}.apk"
+            fi
+          fi
+          
+          echo "Uploading APK assets to GitHub release $RELEASE_TAG..."
+          gh release upload "$RELEASE_TAG" dist-apk/*.apk --clobber
