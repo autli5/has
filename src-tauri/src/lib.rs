@@ -1,7 +1,8 @@
 mod admin;
 mod auth;
 mod storage;
-mod second_brain;
+mod profile;
+mod cinema;
 
 use admin::DeviceSecurityInfo;
 use auth::{AuthResponse, DbStatus, ResetRequestResponse};
@@ -194,11 +195,15 @@ pub fn run() {
             update_admin_security_policy,
             admin_update_user,
             admin_delete_user,
-            second_brain::list_server_notes,
-            second_brain::get_server_note_by_id,
-            second_brain::save_server_note,
-            second_brain::delete_server_note,
-            second_brain::get_notes_stats
+            profile::get_user_profile,
+            profile::save_user_profile,
+            cinema::get_cinema_config,
+            cinema::get_cinema_state,
+            cinema::save_cinema_state,
+            cinema::update_cinema_progress,
+            cinema::toggle_cinema_bookmark,
+            cinema::tmdb_query,
+            cinema::get_russian_media_info
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -29,6 +29,7 @@ pub struct UserDto {
     pub email: String,
     pub username: Option<String>,
     pub role: String,
+    pub avatar: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -298,13 +299,14 @@ pub async fn authenticate_user(email: &str, password: &str) -> AuthResponse {
             );
             ALTER TABLE users ADD COLUMN IF NOT EXISTS username VARCHAR(255);
             ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR(50) DEFAULT 'user';
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar TEXT;
             UPDATE users SET role = 'admin' WHERE id = 1 AND (role IS NULL OR role = '');
         ";
         let _ = client.batch_execute(create_table_sql).await;
     }
 
     let query_with_role = format!(
-        "SELECT {}, username, role FROM {} WHERE LOWER({}) = LOWER($1) LIMIT 1",
+        "SELECT {}, username, role, avatar FROM {} WHERE LOWER({}) = LOWER($1) LIMIT 1",
         config.password_column, config.users_table, config.email_column
     );
 
@@ -324,6 +326,7 @@ pub async fn authenticate_user(email: &str, password: &str) -> AuthResponse {
             let stored_pwd: Result<String, _> = row.try_get(0);
             let username: Option<String> = row.try_get(1).ok();
             let role_opt: Option<String> = row.try_get(2).ok();
+            let avatar: Option<String> = row.try_get(3).ok();
             let role = role_opt.filter(|r| !r.trim().is_empty()).unwrap_or_else(|| "user".to_string());
             match stored_pwd {
                 Ok(stored_password) => {
@@ -335,6 +338,7 @@ pub async fn authenticate_user(email: &str, password: &str) -> AuthResponse {
                                 email: clean_email.to_string(),
                                 username,
                                 role,
+                                avatar,
                             }),
                         }
                     } else {
@@ -465,6 +469,7 @@ pub async fn register_user(email: &str, password: &str, username: Option<&str>) 
                 email: clean_email.to_string(),
                 username: clean_username.map(String::from),
                 role: assigned_role.to_string(),
+                avatar: None,
             }),
         },
         Err(e) => {
@@ -810,6 +815,7 @@ pub async fn reset_password_with_code(email: &str, code: &str, new_password: &st
                     email: clean_email.to_string(),
                     username: None,
                     role: "user".to_string(),
+                    avatar: None,
                 }),
             }
         }

@@ -2,6 +2,7 @@ export interface UserDto {
   email: string;
   username?: string | null;
   role?: string;
+  avatar?: string | null;
 }
 
 export interface AuthResponse {
@@ -83,57 +84,80 @@ export interface DeviceSecurityInfo {
   can_admin_manage: boolean;
 }
 
-export type ParaFolder = "00_Inbox" | "01_Projects" | "02_Areas" | "03_Resources" | "04_Archive";
-export type NoteType = "inbox" | "project" | "area" | "resource" | "archive";
-export type NoteStatus = "draft" | "in-progress" | "completed" | "permanent";
-
-export interface NoteSummaryDto {
+export interface UserProfileDto {
   id: number;
-  title: string;
-  folder: ParaFolder;
-  note_type: NoteType;
-  status: NoteStatus;
-  tags: string[];
-  links: string[];
-  summary?: string | null;
-  updated_at: string;
+  email: string;
+  username?: string | null;
+  role: string;
+  avatar?: string | null;
+  bio?: string | null;
+  notify_email: boolean;
+  notify_sound: boolean;
+  notify_security: boolean;
   created_at: string;
 }
 
-export interface NoteDetailDto {
-  id: number;
-  title: string;
-  folder: ParaFolder;
-  note_type: NoteType;
-  status: NoteStatus;
-  tags: string[];
-  links: string[];
-  summary?: string | null;
-  content: string;
-  file_path?: string | null;
-  updated_at: string;
-  created_at: string;
+export interface UserProfileSaveDto {
+  username?: string | null;
+  avatar?: string | null;
+  bio?: string | null;
+  notify_email: boolean;
+  notify_sound: boolean;
+  notify_security: boolean;
 }
 
-export interface NoteSaveDto {
-  id?: number | null;
-  title: string;
-  folder: ParaFolder;
-  note_type: NoteType;
-  status: NoteStatus;
-  tags: string[];
-  links: string[];
-  summary?: string | null;
-  content: string;
+export interface CinemaPlayback {
+  title_id: string;
+  title_name: string;
+  poster_path?: string | null;
+  backdrop_path?: string | null;
+  season: number;
+  episode: number;
+  progress_seconds: number;
+  duration_seconds: number;
+  last_watched: string;
 }
 
-export interface NotesStatsDto {
-  total_notes: number;
-  inbox_count: number;
-  projects_count: number;
-  areas_count: number;
-  resources_count: number;
-  archive_count: number;
-  all_tags: string[];
+export interface CinemaState {
+  bookmarks: string[];
+  history: CinemaPlayback[];
 }
+
+export interface CinemaConfig {
+  tmdb_api_key?: string | null;
+}
+
+export interface CinemaEpisode {
+  id: string;
+  number: number;
+  title: string;
+  thumbnail: string;
+  duration_minutes?: number;
+  description?: string;
+  stream_url?: string;
+}
+
+export interface CinemaSeason {
+  season_number: number;
+  episodes: CinemaEpisode[];
+}
+
+export interface CinemaMediaItem {
+  id: string;
+  tmdb_id?: number;
+  media_type?: "movie" | "tv";
+  title: string;
+  original_title?: string;
+  backdrop_url: string;
+  poster_url: string;
+  release_year: number | string;
+  seasons_count?: number;
+  duration_minutes?: number;
+  genre: string;
+  rating: number | string;
+  synopsis: string;
+  is_original?: boolean;
+  seasons: CinemaSeason[];
+}
+
 

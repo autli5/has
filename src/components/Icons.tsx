@@ -200,6 +200,15 @@ export function CreditCardIcon({ className = "w-5 h-5", width = 20, height = 20 
   );
 }
 
+export function CinemaNavIcon({ className = "w-5 h-5", width = 20, height = 20 }: IconProps) {
+  return (
+    <svg className={className} width={width} height={height} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <rect x="2" y="4" width="20" height="16" rx="3" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
+      <path strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" d="M7 4v16M17 4v16M2 9.5h20M2 14.5h20M2 4.5h5M17 4.5h5M2 19.5h5M17 19.5h5" />
+    </svg>
+  );
+}
+
 export function SettingsNavIcon({ className = "w-5 h-5", width = 20, height = 20 }: IconProps) {
   return (
     <svg className={className} width={width} height={height} fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -407,25 +416,6 @@ export function RefreshIcon({ className = "w-5 h-5", width = 20, height = 20 }: 
   );
 }
 
-export function BrainNavIcon({ className = "w-5 h-5", width = 20, height = 20 }: IconProps) {
-  return (
-    <svg className={className} width={width} height={height} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={1.8}
-        d="M9.5 2A2.5 2.5 0 007 4.5v.18A4 4 0 004 8.5c0 1.28.6 2.42 1.52 3.16A4.5 4.5 0 005.5 20h.5a3 3 0 003-3v-1a2 2 0 012-2h2a2 2 0 012 2v1a3 3 0 003 3h.5a4.5 4.5 0 00-.02-8.34A4 4 0 0020 8.5a4 4 0 00-3-3.82V4.5A2.5 2.5 0 0014.5 2h-5z"
-      />
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={1.8}
-        d="M12 2v13m-3-9.5a2 2 0 013 0m0 0a2 2 0 013 0"
-      />
-    </svg>
-  );
-}
-
 export function TagIcon({ className = "w-4 h-4", width = 16, height = 16 }: IconProps) {
   return (
     <svg className={className} width={width} height={height} fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -448,6 +438,138 @@ export function SparklesIcon({ className = "w-4 h-4", width = 16, height = 16 }:
         strokeWidth={1.8}
         d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.286L13 21l-2.286-6.857L5 12l5.714-2.286L13 3z"
       />
+    </svg>
+  );
+}
+
+export function BoldIcon({ className = "w-4 h-4", width = 16, height = 16 }: IconProps) {
+  return (
+    <svg className={className} width={width} height={height} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.4} d="M6 4h8a4 4 0 014 4 4 4 0 01-4 4H6z M6 12h9a4 4 0 014 4 4 4 0 01-4 4H6z" />
+    </svg>
+  );
+}
+
+export function ItalicIcon({ className = "w-4 h-4", width = 16, height = 16 }: IconProps) {
+  return (
+    <svg className={className} width={width} height={height} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 4h-9m4 16H5M15 4L9 20" />
+    </svg>
+  );
+}
+
+export function UnderlineIcon({ className = "w-4 h-4", width = 16, height = 16 }: IconProps) {
+  return (
+    <svg className={className} width={width} height={height} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 3v7a6 6 0 0012 0V3M4 21h16" />
+    </svg>
+  );
+}
+
+export function StrikethroughIcon({ className = "w-4 h-4", width = 16, height = 16 }: IconProps) {
+  return (
+    <svg className={className} width={width} height={height} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M16 6a3 3 0 00-3-3H9a3 3 0 000 6h4a3 3 0 010 6H8a3 3 0 01-3-3" />
+    </svg>
+  );
+}
+
+export function AlignLeftIcon({ className = "w-4 h-4", width = 16, height = 16 }: IconProps) {
+  return (
+    <svg className={className} width={width} height={height} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h10M4 18h14" />
+    </svg>
+  );
+}
+
+export function AlignCenterIcon({ className = "w-4 h-4", width = 16, height = 16 }: IconProps) {
+  return (
+    <svg className={className} width={width} height={height} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M7 12h10M5 18h14" />
+    </svg>
+  );
+}
+
+export function AlignRightIcon({ className = "w-4 h-4", width = 16, height = 16 }: IconProps) {
+  return (
+    <svg className={className} width={width} height={height} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M10 12h10M6 18h14" />
+    </svg>
+  );
+}
+
+export function ListIcon({ className = "w-4 h-4", width = 16, height = 16 }: IconProps) {
+  return (
+    <svg className={className} width={width} height={height} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />
+    </svg>
+  );
+}
+
+export function NumberedListIcon({ className = "w-4 h-4", width = 16, height = 16 }: IconProps) {
+  return (
+    <svg className={className} width={width} height={height} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 6h14M7 12h14M7 18h14M3 6h1v4M3 10h2M3 14h2l-2 3v1h2" />
+    </svg>
+  );
+}
+
+export function TaskCheckIcon({ className = "w-4 h-4", width = 16, height = 16 }: IconProps) {
+  return (
+    <svg className={className} width={width} height={height} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <rect x="3" y="3" width="18" height="18" rx="3" strokeWidth={2} />
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12l3 3 5-6" />
+    </svg>
+  );
+}
+
+export function CodeIcon({ className = "w-4 h-4", width = 16, height = 16 }: IconProps) {
+  return (
+    <svg className={className} width={width} height={height} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+    </svg>
+  );
+}
+
+export function QuoteIcon({ className = "w-4 h-4", width = 16, height = 16 }: IconProps) {
+  return (
+    <svg className={className} width={width} height={height} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h4v4a4 4 0 01-4 4H6m11-8h4v4a4 4 0 01-4 4h-1" />
+    </svg>
+  );
+}
+
+export function TableIcon({ className = "w-4 h-4", width = 16, height = 16 }: IconProps) {
+  return (
+    <svg className={className} width={width} height={height} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <rect x="3" y="3" width="18" height="18" rx="2" strokeWidth={2} />
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9h18M3 15h18M9 3v18M15 3v18" />
+    </svg>
+  );
+}
+
+export function ImageIcon({ className = "w-4 h-4", width = 16, height = 16 }: IconProps) {
+  return (
+    <svg className={className} width={width} height={height} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <rect x="3" y="3" width="18" height="18" rx="3" strokeWidth={2} />
+      <circle cx="8.5" cy="8.5" r="1.5" fill="currentColor" />
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 15l-5-5L5 21" />
+    </svg>
+  );
+}
+
+export function PencilIcon({ className = "w-4 h-4", width = 16, height = 16 }: IconProps) {
+  return (
+    <svg className={className} width={width} height={height} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+    </svg>
+  );
+}
+
+export function ArrowLeftIcon({ className = "w-4 h-4", width = 16, height = 16 }: IconProps) {
+  return (
+    <svg className={className} width={width} height={height} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
     </svg>
   );
 }
