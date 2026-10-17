@@ -121,6 +121,7 @@ jobs:
         run: npm run tauri -- android build --apk --target aarch64 armv7
         env:
           NDK_HOME: ${{ env.NDK_HOME }}
+          OPENSSL_STATIC: "1"
 
       - name: Upload APK to GitHub Release
         env:
