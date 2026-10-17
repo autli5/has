@@ -39,15 +39,19 @@ fn get_storage_file_path(app: &AppHandle) -> PathBuf {
     data_dir.join("cinema_state.json")
 }
 
+// Built-in verified TMDB API key used as fallback in production release builds (when .env is absent)
+pub const DEFAULT_TMDB_API_KEY: &str = "31a7712e584811e0751d15b653efbe2f";
+
 #[tauri::command]
 pub fn get_cinema_config() -> CinemaConfig {
     crate::auth::load_env();
     let key = std::env::var("TMDB_API_KEY")
         .ok()
         .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty());
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| DEFAULT_TMDB_API_KEY.to_string());
 
-    CinemaConfig { tmdb_api_key: key }
+    CinemaConfig { tmdb_api_key: Some(key) }
 }
 
 #[tauri::command]
@@ -123,7 +127,7 @@ pub async fn tmdb_query(endpoint: String) -> Result<serde_json::Value, String> {
         .ok()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| "TMDB_API_KEY не указан в файле .env".to_string())?;
+        .unwrap_or_else(|| DEFAULT_TMDB_API_KEY.to_string());
 
     let unblocked_addrs = [
         "108.156.107.41:443".parse().unwrap(),

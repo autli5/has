@@ -178,6 +178,57 @@ const INITIAL_LIBRARY: CinemaMediaItem[] = [
       },
     ],
   },
+  {
+    id: "oppenheimer",
+    tmdb_id: 872585,
+    media_type: "movie",
+    title: "Оппенгеймер",
+    original_title: "Oppenheimer",
+    backdrop_url: "https://images.unsplash.com/photo-1509198397868-475647b2a1e5?q=80&w=1600&auto=format&fit=crop",
+    poster_url: "https://images.unsplash.com/photo-1534447677768-be436bb09401?q=80&w=600&auto=format&fit=crop",
+    release_year: 2023,
+    duration_minutes: 180,
+    genre: "Драма / История",
+    rating: 4.9,
+    synopsis: "История американского физика-теоретика Роберта Оппенгеймера, руководителя Манхэттенского проекта во время Второй мировой войны.",
+    is_original: false,
+    seasons: [
+      {
+        season_number: 1,
+        episodes: [
+          {
+            id: "oppenheimer-full",
+            number: 1,
+            title: "Полный фильм",
+            thumbnail: "https://images.unsplash.com/photo-1534447677768-be436bb09401?q=80&w=600&auto=format&fit=crop",
+            duration_minutes: 180,
+          },
+        ],
+      },
+    ],
+  },
+  {
+    id: "jujutsu-kaisen",
+    tmdb_id: 95479,
+    media_type: "tv",
+    title: "Магическая битва",
+    original_title: "Jujutsu Kaisen",
+    backdrop_url: "https://images.unsplash.com/photo-1578632767115-351597cf2477?q=80&w=1600&auto=format&fit=crop",
+    poster_url: "https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?q=80&w=600&auto=format&fit=crop",
+    release_year: 2020,
+    seasons_count: 2,
+    genre: "Аниме / Экшен",
+    rating: 4.9,
+    synopsis: "Юдзи Итадори проглатывает палец могущественного демона Рёмэна Сукуны и вступает в Токийский магический колледж.",
+    is_original: true,
+    seasons: buildAnimeSeasons(
+      [
+        { season_number: 1, count: 24 },
+        { season_number: 2, count: 23 },
+      ],
+      "https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?q=80&w=600&auto=format&fit=crop"
+    ),
+  },
 ];
 
 interface RawTmdbItem {
