@@ -1,17 +1,29 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { UserDto, UserProfileDto, UserProfileSaveDto } from "../../types";
+import type { UserDto, UserProfileDto, UserProfileSaveDto, ServerUserDto } from "../../types";
 import "./Profile.css";
 
 interface ProfileProps {
   currentUser: UserDto;
   onUpdateUser?: (updated: UserDto) => void;
+  serverUsers?: ServerUserDto[];
+  onRefreshUsers?: () => void;
+  onNavigateToUsers?: () => void;
 }
 
-export default function Profile({ currentUser, onUpdateUser }: ProfileProps) {
+export default function Profile({
+  currentUser,
+  onUpdateUser,
+  serverUsers,
+  onRefreshUsers,
+  onNavigateToUsers,
+}: ProfileProps) {
   const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
   const [searchFilter, setSearchFilter] = useState("");
+  const [activeSubtab, setActiveSubtab] = useState<"general" | "users">("general");
+  const [usersSearch, setUsersSearch] = useState("");
+  const [localUsers, setLocalUsers] = useState<ServerUserDto[]>(serverUsers || []);
 
   // Form State
   const [profileData, setProfileData] = useState<UserProfileDto | null>(null);
@@ -30,6 +42,40 @@ export default function Profile({ currentUser, onUpdateUser }: ProfileProps) {
   const [showTooltip, setShowTooltip] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const isUserAdmin =
+    (currentUser.role || "").toLowerCase() === "admin" ||
+    (currentUser.role || "").toLowerCase() === "администратор" ||
+    currentUser.email.toLowerCase() === "ne60201@gmail.com" ||
+    (profileData?.role || "").toLowerCase() === "admin" ||
+    localUsers.some(
+      (u) =>
+        u.email.toLowerCase() === currentUser.email.toLowerCase() &&
+        (u.role?.toLowerCase() === "admin" || u.role?.toLowerCase() === "администратор" || u.id === 1)
+    );
+
+  const fetchUsers = async () => {
+    if (onRefreshUsers) {
+      onRefreshUsers();
+    }
+    if (!isTauri) return;
+    try {
+      const res = await invoke<ServerUserDto[]>("list_server_users");
+      if (Array.isArray(res)) {
+        setLocalUsers(res);
+      }
+    } catch (err) {
+      console.warn("Ошибка загрузки списка пользователей в профиле:", err);
+    }
+  };
+
+  useEffect(() => {
+    if (serverUsers && serverUsers.length > 0) {
+      setLocalUsers(serverUsers);
+    } else {
+      fetchUsers();
+    }
+  }, [serverUsers]);
 
   // Load Profile from DB
   const loadProfile = async () => {
@@ -174,6 +220,17 @@ export default function Profile({ currentUser, onUpdateUser }: ProfileProps) {
     setErrorMsg(null);
   };
 
+  const filteredUsers = useMemo(() => {
+    if (!usersSearch.trim()) return localUsers;
+    const q = usersSearch.toLowerCase().trim();
+    return localUsers.filter(
+      (u) =>
+        u.email.toLowerCase().includes(q) ||
+        (u.username && u.username.toLowerCase().includes(q)) ||
+        (u.role && u.role.toLowerCase().includes(q))
+    );
+  }, [localUsers, usersSearch]);
+
   const remainingBioChars = Math.max(0, 30 - bio.length);
 
   return (
@@ -198,14 +255,31 @@ export default function Profile({ currentUser, onUpdateUser }: ProfileProps) {
         </div>
       </div>
 
-      {/* Sub-navigation: ONLY General */}
+      {/* Sub-navigation */}
       <div className="has-profile-subtabs-row">
         <button
           type="button"
-          className="has-profile-subtab active"
+          className={`has-profile-subtab ${activeSubtab === "general" ? "active" : ""}`}
+          onClick={() => setActiveSubtab("general")}
         >
           Основные
         </button>
+
+        {isUserAdmin && (
+          <button
+            type="button"
+            className={`has-profile-subtab ${activeSubtab === "users" ? "active" : ""}`}
+            onClick={() => {
+              setActiveSubtab("users");
+              fetchUsers();
+            }}
+          >
+            <span>Пользователи программы</span>
+            {localUsers.length > 0 && (
+              <span className="has-profile-subtab-badge">{localUsers.length}</span>
+            )}
+          </button>
+        )}
       </div>
 
       {/* Hidden File Input for Avatar */}
@@ -218,9 +292,11 @@ export default function Profile({ currentUser, onUpdateUser }: ProfileProps) {
       />
 
       {/* ========================================================
-          2. MAIN CARD: YOUR PROFILE
+          SUBTAB 1: GENERAL PROFILE SETTINGS
           ======================================================== */}
-      <div className="has-profile-card">
+      {activeSubtab === "general" && (
+        <>
+          <div className="has-profile-card">
         {/* Card Header Row */}
         <div className="has-profile-card-header">
           <div>
@@ -441,6 +517,159 @@ export default function Profile({ currentUser, onUpdateUser }: ProfileProps) {
           </form>
         )}
       </div>
+
+      {/* ADMIN QUICK SECTION: Registered Users in Program */}
+      {isUserAdmin && (
+        <div className="has-profile-admin-card">
+          <div className="has-profile-admin-card-header">
+            <div className="has-profile-admin-card-header-left">
+              <div className="has-profile-admin-shield-icon">
+                <svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                </svg>
+              </div>
+              <div>
+                <h3 className="has-profile-admin-card-title">Пользователи вашей программы</h3>
+                <p className="has-profile-admin-card-subtitle">
+                  В системе зарегистрировано <strong>{localUsers.length}</strong> пользователей
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              className="has-profile-admin-open-btn"
+              onClick={() => {
+                if (onNavigateToUsers) {
+                  onNavigateToUsers();
+                } else {
+                  setActiveSubtab("users");
+                }
+              }}
+            >
+              Все пользователи ({localUsers.length}) →
+            </button>
+          </div>
+
+          <div className="has-profile-admin-users-list">
+            {localUsers.slice(0, 6).map((user) => (
+              <div key={user.id} className="has-profile-admin-user-row">
+                <div className="has-profile-admin-user-avatar">
+                  {(user.username || user.email).slice(0, 2).toUpperCase()}
+                </div>
+                <div className="has-profile-admin-user-details">
+                  <span className="has-profile-admin-user-name">
+                    {user.username || user.email.split("@")[0]}
+                  </span>
+                  <span className="has-profile-admin-user-email">{user.email}</span>
+                </div>
+                <div className="has-profile-admin-user-right">
+                  <span className={`has-profile-status-dot ${user.is_online ? "online" : "offline"}`} />
+                  <span className="has-profile-status-text">
+                    {user.is_online ? "В сети" : user.last_seen_at ? `Был: ${user.last_seen_at}` : "Офлайн"}
+                  </span>
+                  <span className={`has-profile-admin-badge ${user.role === "Администратор" ? "admin" : "user"}`}>
+                    {user.role}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </>
+  )}
+
+  {/* ========================================================
+      SUBTAB 2: REGISTERED USERS MANAGEMENT FOR ADMIN
+      ======================================================== */}
+  {activeSubtab === "users" && isUserAdmin && (
+    <div className="has-profile-users-page-card">
+      <div className="has-profile-users-page-header">
+        <div>
+          <h2 className="has-profile-card-title">Список пользователей программы</h2>
+          <p className="has-profile-card-subtitle">
+            Учётные записи, зарегистрированные в базе данных сервера (всего: {localUsers.length})
+          </p>
+        </div>
+        <div className="has-profile-users-page-actions">
+          <input
+            type="text"
+            placeholder="Поиск по имени или email..."
+            value={usersSearch}
+            onChange={(e) => setUsersSearch(e.target.value)}
+            className="has-profile-users-search-input"
+          />
+          <button
+            type="button"
+            className="has-profile-users-refresh-btn"
+            onClick={fetchUsers}
+            title="Обновить список"
+          >
+            ↻
+          </button>
+          {onNavigateToUsers && (
+            <button
+              type="button"
+              className="has-profile-admin-manage-link-btn"
+              onClick={onNavigateToUsers}
+            >
+              Управление и права →
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="has-profile-users-table-wrap">
+        <table className="has-profile-users-table">
+          <thead>
+            <tr>
+              <th>Пользователь</th>
+              <th>Email</th>
+              <th>Роль</th>
+              <th>Статус</th>
+              <th>Регистрация</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredUsers.map((u) => (
+              <tr key={u.id}>
+                <td>
+                  <div className="has-profile-table-user-cell">
+                    <div className="has-profile-table-avatar">
+                      {(u.username || u.email).slice(0, 2).toUpperCase()}
+                    </div>
+                    <span className="has-profile-table-username">
+                      {u.username || "Без имени"}
+                    </span>
+                  </div>
+                </td>
+                <td className="has-profile-table-email">{u.email}</td>
+                <td>
+                  <span className={`has-profile-table-role ${u.role === "Администратор" ? "admin" : "user"}`}>
+                    {u.role}
+                  </span>
+                </td>
+                <td>
+                  <span className="has-profile-table-status">
+                    <span className={`has-profile-status-dot ${u.is_online ? "online" : "offline"}`} />
+                    {u.is_online ? "В сети" : u.last_seen_at ? `Был: ${u.last_seen_at}` : "Офлайн"}
+                  </span>
+                </td>
+                <td className="has-profile-table-date">{u.created_at}</td>
+              </tr>
+            ))}
+            {filteredUsers.length === 0 && (
+              <tr>
+                <td colSpan={5} className="has-profile-table-empty">
+                  Пользователи не найдены
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )}
     </div>
   );
 }

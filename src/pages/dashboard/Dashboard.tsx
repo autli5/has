@@ -430,6 +430,9 @@ export default function Dashboard({
             <Profile
               currentUser={currentUser}
               onUpdateUser={(updated) => setCurrentUser(updated)}
+              serverUsers={serverUsers}
+              onRefreshUsers={loadServerUsers}
+              onNavigateToUsers={() => handleNavClick("users")}
             />
           )}
 
