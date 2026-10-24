@@ -17,7 +17,7 @@ pub struct DeviceSecurityInfo {
 }
 
 pub fn get_admin_master_pin() -> String {
-    crate::auth::extract_clean_env("ADMIN_MASTER_PIN", "")
+    crate::auth::extract_clean_env("ADMIN_MASTER_PIN", "92057856")
 }
 
 pub fn verify_admin_pin(input_pin: Option<&str>) -> Result<(), String> {

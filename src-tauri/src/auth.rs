@@ -120,18 +120,18 @@ pub fn get_db_config() -> DbConfig {
     load_env();
 
     let database_url = env::var("DATABASE_URL").ok().filter(|s| !s.trim().is_empty());
-    let host = extract_clean_env("DB_HOST", "127.0.0.1");
+    let host = extract_clean_env("DB_HOST", "80.237.77.141");
     let port = extract_clean_env("DB_PORT", "5432")
         .parse::<u16>()
         .unwrap_or(5432);
-    let user = extract_clean_env("DB_USER", "postgres");
-    let pass_str = extract_clean_env("DB_PASSWORD", "");
+    let user = extract_clean_env("DB_USER", "has_app");
+    let pass_str = extract_clean_env("DB_PASSWORD", "Master1017%e");
     let password = if !pass_str.is_empty() {
         Some(pass_str)
     } else {
         None
     };
-    let dbname = extract_clean_env("DB_NAME", "postgres");
+    let dbname = extract_clean_env("DB_NAME", "has");
     let ssl_mode = extract_clean_env("DB_SSL_MODE", "prefer").to_lowercase();
 
     let users_table = extract_clean_env("DB_USERS_TABLE", "users");
@@ -785,10 +785,10 @@ pub async fn request_reset_code(email: &str) -> ResetRequestResponse {
                 });
             }
 
-            let smtp_host = extract_clean_env("SMTP_HOST", "");
+            let smtp_host = extract_clean_env("SMTP_HOST", "smtp.mail.ru");
             let smtp_port = extract_clean_env("SMTP_PORT", "465").parse::<u16>().unwrap_or(465);
-            let smtp_user = extract_clean_env("SMTP_USER", "");
-            let smtp_pass = extract_clean_env("SMTP_PASSWORD", "");
+            let smtp_user = extract_clean_env("SMTP_USER", "scorporation@internet.ru");
+            let smtp_pass = extract_clean_env("SMTP_PASSWORD", "87AhqOfdlC5LPb5eIX3N");
             let smtp_from = extract_clean_env("SMTP_FROM", &smtp_user);
 
             let dev_code;
@@ -970,3 +970,20 @@ pub async fn reset_password_with_code(email: &str, code: &str, new_password: &st
         },
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_database_connection() {
+        let config = get_db_config();
+        println!("Testing DB connection to host: {}", config.host);
+        let client_res = connect_to_db(&config).await;
+        assert!(client_res.is_ok(), "Failed to connect to DB: {:?}", client_res.err());
+        let client = client_res.unwrap();
+        let query_res = client.simple_query("SELECT 1;").await;
+        assert!(query_res.is_ok(), "Failed to run simple query: {:?}", query_res.err());
+    }
+}
+
