@@ -1,0 +1,180 @@
+name: Release Build & Auto-Updater
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Target Release Tag (e.g. v0.1.5)'
+        required: false
+        default: 'v0.1.5'
+
+jobs:
+  release:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: 'macos-latest'
+            target: 'aarch64-apple-darwin'
+          - platform: 'windows-latest'
+            target: 'x86_64-pc-windows-msvc'
+          - platform: 'ubuntu-22.04'
+            target: 'x86_64-unknown-linux-gnu'
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Linux build dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev rpm
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Setup Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build Tauri and publish Release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY || 'dW50cnVzdGVkIGNvbW1lbnQ6IHJzaWduIGVuY3J5cHRlZCBzZWNyZXQga2V5ClJXUlRZMEl5VUF0UnlMZjR6bE4vUUFIbnQ0MDdjQ01xSXBHUVVMZ0k2OURzMEhrbkZwNEFBQkFBQUFBQUFBQUFBQUlBQUFBQU1GZmxKUFZFcGJXSW1LUlRvVXN6SjJSV1FYMnhYQldjOFRtTE4rRkRSUGEvM0xDVFZPOVovL3Q1N3Rmdi9PUG9XOWxGdHM5bjFNc3BKZCtCWHdkWDVsNW9LaHhZNXpFbFNSYkNkeXFLQmRuNmNyeHA0Rlp4UVhSUENPUFJrUnVCandLd2ZBSy95V2M9Cg==' }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
+        with:
+          tagName: ${{ inputs.tag || github.ref_name }}
+          releaseName: 'Home Autli Server ${{ inputs.tag || github.ref_name }}'
+          releaseBody: 'Автоматический релиз для Android (.apk), Linux (.deb, .rpm, .AppImage), Windows (.exe) и macOS (.dmg).'
+          releaseDraft: false
+          prerelease: false
+          args: ${{ matrix.target && format('--target {0}', matrix.target) || '' }}
+
+  release-android:
+    needs: release
+    if: always() && (needs.release.result == 'success' || needs.release.result == 'skipped')
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Setup Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi
+
+      - name: Setup Android NDK
+        run: |
+          echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+          if [ -d "$ANDROID_SDK_ROOT/ndk/26.1.10909125" ]; then
+            NDK_PATH="$ANDROID_SDK_ROOT/ndk/26.1.10909125"
+          else
+            NDK_LATEST=$(ls -d $ANDROID_SDK_ROOT/ndk/* 2>/dev/null | tail -n 1 || true)
+            if [ -n "$NDK_LATEST" ]; then
+              NDK_PATH="$NDK_LATEST"
+            else
+              echo "y" | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "ndk;26.1.10909125"
+              NDK_PATH="$ANDROID_SDK_ROOT/ndk/26.1.10909125"
+            fi
+          fi
+          echo "NDK_HOME=$NDK_PATH" >> $GITHUB_ENV
+          
+          TOOLCHAIN="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64"
+          echo "TOOLCHAIN=$TOOLCHAIN" >> $GITHUB_ENV
+          echo "$TOOLCHAIN/bin" >> $GITHUB_PATH
+          
+          # Create symlinks for legacy GNU binutils expected by OpenSSL makefile
+          for prefix in aarch64-linux-android arm-linux-androideabi armv7a-linux-androideabi; do
+            sudo ln -sf "$TOOLCHAIN/bin/llvm-ar" "/usr/local/bin/${prefix}-ar"
+            sudo ln -sf "$TOOLCHAIN/bin/llvm-ranlib" "/usr/local/bin/${prefix}-ranlib"
+            sudo ln -sf "$TOOLCHAIN/bin/llvm-nm" "/usr/local/bin/${prefix}-nm"
+            sudo ln -sf "$TOOLCHAIN/bin/llvm-as" "/usr/local/bin/${prefix}-as"
+            sudo ln -sf "$TOOLCHAIN/bin/llvm-strip" "/usr/local/bin/${prefix}-strip"
+            
+            sudo ln -sf "$TOOLCHAIN/bin/llvm-ar" "$TOOLCHAIN/bin/${prefix}-ar"
+            sudo ln -sf "$TOOLCHAIN/bin/llvm-ranlib" "$TOOLCHAIN/bin/${prefix}-ranlib"
+            sudo ln -sf "$TOOLCHAIN/bin/llvm-nm" "$TOOLCHAIN/bin/${prefix}-nm"
+            sudo ln -sf "$TOOLCHAIN/bin/llvm-as" "$TOOLCHAIN/bin/${prefix}-as"
+            sudo ln -sf "$TOOLCHAIN/bin/llvm-strip" "$TOOLCHAIN/bin/${prefix}-strip"
+          done
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build Android APK
+        run: npm run tauri -- android build --apk --target aarch64 armv7
+        env:
+          NDK_HOME: ${{ env.NDK_HOME }}
+          OPENSSL_STATIC: "1"
+          AR_aarch64_linux_android: llvm-ar
+          RANLIB_aarch64_linux_android: llvm-ranlib
+          AR_armv7_linux_androideabi: llvm-ar
+          RANLIB_armv7_linux_androideabi: llvm-ranlib
+
+      - name: Upload APK to GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          RELEASE_TAG="${{ inputs.tag || github.ref_name }}"
+          echo "Target Release Tag is: $RELEASE_TAG"
+          
+          mkdir -p dist-apk
+          for apk in $(find src-tauri/gen/android/app/build/outputs/apk -type f -name "*.apk"); do
+            filename=$(basename "$apk")
+            echo "Found APK: $apk ($filename)"
+            cp "$apk" "dist-apk/Home.Autli.Server_${RELEASE_TAG}_${filename}"
+            if [[ "$filename" == *"universal"* ]] || [[ "$filename" == *"release"* ]]; then
+              cp "$apk" "dist-apk/Home.Autli.Server_${RELEASE_TAG}.apk"
+            fi
+          done
+          
+          if [ ! -f "dist-apk/Home.Autli.Server_${RELEASE_TAG}.apk" ]; then
+            first_apk=$(find dist-apk -type f -name "*.apk" | head -n 1)
+            if [ -n "$first_apk" ]; then
+              cp "$first_apk" "dist-apk/Home.Autli.Server_${RELEASE_TAG}.apk"
+            fi
+          fi
+          
+          echo "Uploading APK assets to GitHub release $RELEASE_TAG..."
+          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" --title "Home Autli Server $RELEASE_TAG" --notes "Release $RELEASE_TAG"
+          fi
+          gh release upload "$RELEASE_TAG" dist-apk/*.apk --clobber

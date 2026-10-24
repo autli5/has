@@ -1,0 +1,13 @@
+/* ========================================================
+   APIS PAGE STYLES
+   ======================================================== */
+
+.has-apis-hint {
+  color: #64748b;
+  font-size: 14px;
+  margin-bottom: 16px;
+}
+
+.has-mono-val {
+  font-family: monospace;
+}
