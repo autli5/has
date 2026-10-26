@@ -2251,6 +2251,14 @@ export default function Cinema({
 
   return (
     <div className={`has-cinema-container ${isTvMode ? "has-tv-mode" : ""}`} ref={topRef}>
+      {/* Semi-transparent Backdrop for TV Navigation Drawer */}
+      {isTvMode && isTvNavOpen && (
+        <div
+          className="has-cinema-tv-nav-backdrop"
+          onClick={() => setIsTvNavOpen(false)}
+        />
+      )}
+
       {/* ========================================================
           ANDROID TV LEANBACK NAVIGATION DRAWER
           (Opens when pressing Left from cards, remote Menu, or Menu pill)
@@ -3946,30 +3954,6 @@ export default function Cinema({
               </div>
             </div>
           )}
-        </div>
-      )}
-
-      {/* ========================================================
-          6. ANDROID TV REMOTE CONTROL GUIDE & ON-SCREEN TOAST
-          ======================================================== */}
-      {isTvMode && (
-        <div className="has-cinema-tv-remote-guide">
-          <div className="has-cinema-tv-guide-item">
-            <span className="has-cinema-tv-key">▲ ▼ ◀ ▶</span>
-            <span>Навигация</span>
-          </div>
-          <div className="has-cinema-tv-guide-item">
-            <span className="has-cinema-tv-key">OK</span>
-            <span>Выбрать</span>
-          </div>
-          <div className="has-cinema-tv-guide-item">
-            <span className="has-cinema-tv-key">Back</span>
-            <span>Назад</span>
-          </div>
-          <div className="has-cinema-tv-guide-item">
-            <span className="has-cinema-tv-key">◀ Меню</span>
-            <span>Разделы</span>
-          </div>
         </div>
       )}
 
