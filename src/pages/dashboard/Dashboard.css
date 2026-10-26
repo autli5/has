@@ -704,3 +704,25 @@
   }
 }
 
+/* Smart TV / Android TV Environment Rules */
+.has-dashboard-wrapper.has-tv-mode-root .has-sidebar {
+  display: none !important;
+}
+
+.has-dashboard-wrapper.has-tv-mode-root .has-mobile-top-bar {
+  display: none !important;
+}
+
+.has-dashboard-wrapper.has-tv-mode-root .has-main-content {
+  margin-left: 0 !important;
+  width: 100vw !important;
+  max-width: 100vw !important;
+  padding: 0 !important;
+}
+
+.has-dashboard-wrapper.has-tv-mode-root .has-tv-back-to-cinema-btn:focus {
+  outline: 4px solid #818cf8 !important;
+  box-shadow: 0 0 25px rgba(129, 140, 248, 0.9) !important;
+  transform: scale(1.05);
+}
+

@@ -32,6 +32,40 @@ interface DashboardProps {
 
 type NavTab = "home" | "storage" | "cinema" | "users" | "settings" | "profile" | "help";
 
+// Helper for Smart TV / Android TV detection
+const detectTvEnvironment = (): boolean => {
+  if (typeof window === "undefined") return false;
+  const saved = localStorage.getItem("has_tv_mode");
+  if (saved !== null) return saved === "true";
+  const ua = (navigator.userAgent || "").toLowerCase();
+  const isTvUa =
+    ua.includes("android tv") ||
+    ua.includes("smarttv") ||
+    ua.includes("googletv") ||
+    ua.includes("tizen") ||
+    ua.includes("webos") ||
+    ua.includes("appletv") ||
+    ua.includes("crkey") ||
+    ua.includes("bravia") ||
+    ua.includes("aftt") ||
+    ua.includes("aftm") ||
+    ua.includes("mibox") ||
+    ua.includes("mi box") ||
+    ua.includes("shield") ||
+    ua.includes("dtv") ||
+    ua.includes("smart-tv") ||
+    ua.includes("hbbtv") ||
+    ua.includes("netcast") ||
+    ua.includes("viera") ||
+    ua.includes("roku") ||
+    ua.includes("firetv");
+  if (isTvUa) return true;
+  const isAndroid = ua.includes("android");
+  const noTouch = !("ontouchstart" in window) && navigator.maxTouchPoints === 0;
+  if (isAndroid && noTouch) return true;
+  return false;
+};
+
 export default function Dashboard({
   user,
   dbInfo,
@@ -43,13 +77,31 @@ export default function Dashboard({
     setCurrentUser(user);
   }, [user]);
 
-  const [activeTab, setActiveTab] = useState<NavTab>("home");
+  const [isTvEnvironment, setIsTvEnvironment] = useState<boolean>(detectTvEnvironment);
+  const [activeTab, setActiveTab] = useState<NavTab>(() => {
+    return detectTvEnvironment() ? "cinema" : "home";
+  });
   const [serverUsers, setServerUsers] = useState<ServerUserDto[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState<boolean>(() => {
     return localStorage.getItem("has_sidebar_collapsed") === "true";
   });
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  // Dynamic D-Pad Remote Control Key Listener (Auto-detects TV when user presses remote buttons)
+  useEffect(() => {
+    const handleRemoteDpadKey = (e: KeyboardEvent) => {
+      const isRemoteKey =
+        [19, 20, 21, 22, 23, 4, 82, 85, 179].includes(e.keyCode) ||
+        ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key);
+      if (isRemoteKey && !isTvEnvironment) {
+        setIsTvEnvironment(true);
+        localStorage.setItem("has_tv_mode", "true");
+      }
+    };
+    window.addEventListener("keydown", handleRemoteDpadKey);
+    return () => window.removeEventListener("keydown", handleRemoteDpadKey);
+  }, [isTvEnvironment]);
 
   const handleNavClick = (tab: NavTab) => {
     setActiveTab(tab);
@@ -151,7 +203,7 @@ export default function Dashboard({
   }, [activeTab, loadServerUsers]);
 
   return (
-    <div className="has-dashboard-wrapper">
+    <div className={`has-dashboard-wrapper ${isTvEnvironment ? "has-tv-mode-root" : ""}`}>
       {/* Mobile Top Header (Visible on Mobile / Small screens) */}
       <header className="has-mobile-top-bar">
         <div
@@ -233,7 +285,7 @@ export default function Dashboard({
             type="button"
             className={`has-nav-item ${activeTab === "home" ? "active" : ""}`}
             onClick={() => handleNavClick("home")}
-            title={isCollapsed ? (isUserAdmin ? "Главная" : "Кинотеатр") : undefined}
+            title={isCollapsed ? (isUserAdmin ? "Панель сервера" : "Кинотеатр") : undefined}
           >
             <div className="has-nav-item-left">
               {isUserAdmin ? (
@@ -241,7 +293,7 @@ export default function Dashboard({
               ) : (
                 <CinemaNavIcon className="w-5 h-5" width={20} height={20} />
               )}
-              {!isCollapsed && <span>{isUserAdmin ? "Главная" : "Кинотеатр"}</span>}
+              {!isCollapsed && <span>{isUserAdmin ? "Панель сервера" : "Кинотеатр"}</span>}
             </div>
           </button>
 
@@ -389,6 +441,27 @@ export default function Dashboard({
               <span className="has-status-indicator" />
               <span>{dbStatus?.connected ? "Система активна" : "Проверка связи..."}</span>
             </div>
+
+            {isTvEnvironment && (
+              <button
+                type="button"
+                className="has-tv-back-to-cinema-btn"
+                onClick={() => handleNavClick("cinema")}
+                data-tv-focusable="true"
+                style={{
+                  padding: "10px 20px",
+                  background: "linear-gradient(135deg, #6366f1, #8b5cf6)",
+                  color: "#fff",
+                  fontWeight: 600,
+                  fontSize: "14px",
+                  borderRadius: "8px",
+                  border: "none",
+                  cursor: "pointer",
+                }}
+              >
+                🎬 Вернуться в Кинотеатр
+              </button>
+            )}
           </header>
         )}
 
@@ -404,13 +477,25 @@ export default function Dashboard({
                 usersCount={serverUsers.length}
               />
             ) : (
-              <Cinema currentUser={currentUser} />
+              <Cinema
+                currentUser={currentUser}
+                onNavigateTab={(tab) => handleNavClick(tab as NavTab)}
+                onLogout={onLogout}
+                isTvEnvironment={isTvEnvironment}
+              />
             )
           )}
 
           {activeTab === "storage" && <Storage currentUser={currentUser} />}
 
-          {activeTab === "cinema" && isUserAdmin && <Cinema currentUser={currentUser} />}
+          {activeTab === "cinema" && isUserAdmin && (
+            <Cinema
+              currentUser={currentUser}
+              onNavigateTab={(tab) => handleNavClick(tab as NavTab)}
+              onLogout={onLogout}
+              isTvEnvironment={isTvEnvironment}
+            />
+          )}
 
           {activeTab === "users" && isUserAdmin && (
             <Users

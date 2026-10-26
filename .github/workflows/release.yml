@@ -163,6 +163,7 @@ jobs:
             cp "$apk" "dist-apk/Home.Autli.Server_${RELEASE_TAG}_${filename}"
             if [[ "$filename" == *"universal"* ]] || [[ "$filename" == *"release"* ]]; then
               cp "$apk" "dist-apk/Home.Autli.Server_${RELEASE_TAG}.apk"
+              cp "$apk" "dist-apk/Home.Autli.Server_TV_${RELEASE_TAG}.apk"
             fi
           done
           
@@ -170,7 +171,11 @@ jobs:
             first_apk=$(find dist-apk -type f -name "*.apk" | head -n 1)
             if [ -n "$first_apk" ]; then
               cp "$first_apk" "dist-apk/Home.Autli.Server_${RELEASE_TAG}.apk"
+              cp "$first_apk" "dist-apk/Home.Autli.Server_TV_${RELEASE_TAG}.apk"
             fi
+          fi
+          if [ ! -f "dist-apk/Home.Autli.Server_TV_${RELEASE_TAG}.apk" ] && [ -f "dist-apk/Home.Autli.Server_${RELEASE_TAG}.apk" ]; then
+            cp "dist-apk/Home.Autli.Server_${RELEASE_TAG}.apk" "dist-apk/Home.Autli.Server_TV_${RELEASE_TAG}.apk"
           fi
           
           echo "Uploading APK assets to GitHub release $RELEASE_TAG..."
