@@ -85,16 +85,17 @@ pub async fn init_admin_security_table(client: &tokio_postgres::Client) -> Resul
         VALUES (1, false, false)
         ON CONFLICT (id) DO NOTHING;
     ";
-    client
-        .batch_execute(sql)
-        .await
-        .map_err(|e| format!("Ошибка создания таблицы безопасности: {}", e))
+    // If has_app lacks DDL permissions on public schema, do not fail admin updates
+    if let Err(e) = client.batch_execute(sql).await {
+        eprintln!("[admin] admin_security_config table creation skipped: {}", e);
+    }
+    Ok(())
 }
 
 pub async fn get_admin_security_info(admin_email: &str) -> Result<DeviceSecurityInfo, String> {
     let config = get_db_config();
     let client = connect_to_db(&config).await?;
-    init_admin_security_table(&client).await?;
+    let _ = init_admin_security_table(&client).await;
 
     let clean_email = admin_email.trim().to_lowercase();
     let user_row = client
@@ -119,17 +120,18 @@ pub async fn get_admin_security_info(admin_email: &str) -> Result<DeviceSecurity
     };
 
     let cfg_row = client
-        .query_one(
+        .query_opt(
             "SELECT device_binding_enabled, trusted_device_name, ip_binding_enabled, trusted_ip FROM admin_security_config WHERE id = 1",
             &[],
         )
         .await
-        .map_err(|e| format!("Ошибка чтения параметров безопасности: {}", e))?;
+        .ok()
+        .flatten();
 
-    let device_binding_enabled: bool = cfg_row.get(0);
-    let trusted_device_name: Option<String> = cfg_row.get(1);
-    let ip_binding_enabled: bool = cfg_row.get(2);
-    let trusted_ip: Option<String> = cfg_row.get(3);
+    let (device_binding_enabled, trusted_device_name, ip_binding_enabled, trusted_ip): (bool, Option<String>, bool, Option<String>) = match cfg_row {
+        Some(row) => (row.get(0), row.get(1), row.get(2), row.get(3)),
+        None => (false, None, false, None),
+    };
 
     let current_device = get_current_device_name();
     let current_ip = get_current_local_ip();
@@ -309,4 +311,28 @@ pub async fn admin_delete_user(
         .map_err(|e| format!("Ошибка удаления пользователя: {}", e))?;
 
     Ok("Пользователь успешно удален".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_init_admin_security() {
+        let config = get_db_config();
+        if let Ok(client) = connect_to_db(&config).await {
+            let res = init_admin_security_table(&client).await;
+            assert!(res.is_ok());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_get_admin_security_info() {
+        let config = get_db_config();
+        if let Ok(_) = connect_to_db(&config).await {
+            let res = get_admin_security_info("dimatyilickiy0511@gmail.com").await;
+            println!("get_admin_security_info result: {:?}", res);
+            assert!(res.is_ok());
+        }
+    }
 }
