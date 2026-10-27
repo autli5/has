@@ -54,6 +54,11 @@ async fn register_with_code(
 async fn validate_email(email: String) -> Result<bool, String> {
     let (_, domain) = auth::validate_email_syntax(&email)?;
     auth::verify_domain_exists(domain).await?;
+    auth::verify_mailbox_exists(&email).await?;
+    if let Ok(is_taken) = auth::check_email_already_registered(&email).await
+        && is_taken {
+            return Err("На этот адрес электронной почты уже зарегистрирован аккаунт. На одну почту можно создать только 1 аккаунт.".to_string());
+        }
     Ok(true)
 }
 

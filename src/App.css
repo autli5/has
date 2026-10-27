@@ -273,6 +273,202 @@ svg {
   border-radius: 6px;
 }
 
+/* ==========================================================================
+   Android TV Fullscreen Centered Update Modal
+   ========================================================================== */
+
+.has-tv-updater-overlay {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(3, 7, 18, 0.92);
+  backdrop-filter: blur(20px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 99999;
+  animation: tvModalFadeIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  user-select: none;
+}
+
+@keyframes tvModalFadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.has-tv-updater-card {
+  width: 620px;
+  max-width: 90vw;
+  background: radial-gradient(circle at top, rgba(30, 41, 59, 0.95) 0%, rgba(15, 23, 42, 0.98) 100%);
+  border: 2px solid rgba(99, 102, 241, 0.5);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.9), 0 0 50px rgba(99, 102, 241, 0.35);
+  border-radius: 28px;
+  padding: 44px 48px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  position: relative;
+}
+
+.has-tv-updater-icon-ring {
+  width: 90px;
+  height: 90px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.2) 0%, rgba(147, 51, 234, 0.3) 100%);
+  border: 2px solid rgba(165, 180, 252, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 42px;
+  margin-bottom: 22px;
+  box-shadow: 0 0 30px rgba(99, 102, 241, 0.5);
+  animation: tvIconPulse 2.5s infinite alternate ease-in-out;
+}
+
+@keyframes tvIconPulse {
+  from {
+    transform: scale(1);
+    box-shadow: 0 0 25px rgba(99, 102, 241, 0.4);
+  }
+  to {
+    transform: scale(1.06);
+    box-shadow: 0 0 45px rgba(99, 102, 241, 0.8);
+  }
+}
+
+.has-tv-updater-title {
+  font-size: 32px;
+  font-weight: 800;
+  color: #ffffff;
+  margin: 0 0 8px 0;
+  letter-spacing: -0.5px;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.6);
+}
+
+.has-tv-updater-version-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(99, 102, 241, 0.2);
+  border: 1px solid rgba(165, 180, 252, 0.35);
+  color: #c7d2fe;
+  font-size: 15px;
+  font-weight: 700;
+  padding: 6px 16px;
+  border-radius: 9999px;
+  margin-bottom: 16px;
+}
+
+.has-tv-updater-desc {
+  font-size: 15px;
+  color: #94a3b8;
+  line-height: 1.6;
+  margin: 0 0 28px 0;
+  max-height: 120px;
+  overflow-y: auto;
+  padding: 0 10px;
+}
+
+/* Exactly Two Buttons Container for TV Remote Control */
+.has-tv-updater-buttons {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  width: 100%;
+}
+
+.has-tv-updater-btn {
+  flex: 1;
+  height: 64px;
+  border-radius: 18px;
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: 0.3px;
+  cursor: pointer;
+  outline: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  transition: all 0.2s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+
+/* Button 1: Обновить */
+.has-tv-updater-btn.btn-update {
+  background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+  border: 2px solid transparent;
+  color: #ffffff;
+  box-shadow: 0 10px 25px rgba(79, 70, 229, 0.4);
+}
+
+/* Button 2: Пропустить */
+.has-tv-updater-btn.btn-skip {
+  background: rgba(30, 41, 59, 0.85);
+  border: 2px solid rgba(255, 255, 255, 0.15);
+  color: #cbd5e1;
+}
+
+/* D-Pad Remote Control Focused Glow */
+.has-tv-updater-btn.focused {
+  transform: scale(1.08);
+  border-color: #ffffff !important;
+  box-shadow: 0 0 0 4px #ffffff, 0 0 40px rgba(99, 102, 241, 0.9) !important;
+  color: #ffffff;
+}
+
+.has-tv-updater-btn.btn-skip.focused {
+  background: rgba(51, 65, 85, 1);
+  box-shadow: 0 0 0 4px #ffffff, 0 0 30px rgba(255, 255, 255, 0.4) !important;
+}
+
+/* TV Progress View */
+.has-tv-updater-progress-container {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  margin-top: 10px;
+}
+
+.has-tv-updater-progress-track {
+  width: 100%;
+  height: 14px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 9999px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.has-tv-updater-progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #38bdf8 0%, #6366f1 50%, #a855f7 100%);
+  border-radius: 9999px;
+  transition: width 0.25s ease;
+}
+
+.has-tv-updater-progress-text {
+  font-size: 16px;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.has-tv-updater-remote-hint {
+  margin-top: 24px;
+  font-size: 13px;
+  color: #64748b;
+  font-weight: 600;
+}
+
 /* Center Content Area */
 .auth-main-container {
   flex: 1;

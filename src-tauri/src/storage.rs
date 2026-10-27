@@ -119,14 +119,12 @@ pub async fn resolve_user_folder_name(client: &tokio_postgres::Client, user_emai
     if let Ok(Some(row)) = client
         .query_opt("SELECT username FROM users WHERE email = $1;", &[&user_email])
         .await
-    {
-        if let Some(uname) = row.try_get::<_, String>(0).ok() {
+        && let Ok(uname) = row.try_get::<_, String>(0) {
             let trimmed = uname.trim();
             if !trimmed.is_empty() {
                 return trimmed.to_lowercase();
             }
         }
-    }
     let fallback = user_email.split('@').next().unwrap_or(user_email);
     fallback.to_lowercase()
 }
@@ -168,14 +166,8 @@ pub async fn resolve_folder_full_path(
     full_path
 }
 
-pub async fn fs_ensure_dir(client: &tokio_postgres::Client, full_path: &str) {
-    use base64::Engine;
-    let b64_path = base64::engine::general_purpose::STANDARD.encode(full_path.as_bytes());
-    let cmd = format!(
-        "COPY (SELECT 1) TO PROGRAM 'python3 -c \"import os, base64; p = base64.b64decode(\\\"{}\\\").decode(\\\"utf-8\\\"); os.makedirs(p, exist_ok=True)\" 2>/dev/null || true';",
-        b64_path
-    );
-    let _ = client.batch_execute(&cmd).await;
+pub async fn fs_ensure_dir(_client: &tokio_postgres::Client, _full_path: &str) {
+    // Pure DB storage - OS shell execution disabled for safety and non-superuser compatibility
 }
 
 pub async fn fs_save_file(
@@ -184,18 +176,7 @@ pub async fn fs_save_file(
     dir_path: &str,
     file_name: &str,
 ) -> Result<String, String> {
-    use base64::Engine;
-    fs_ensure_dir(client, dir_path).await;
-
     let full_file_path = format!("{}/{}", dir_path, file_name);
-    let b64_filepath = base64::engine::general_purpose::STANDARD.encode(full_file_path.as_bytes());
-
-    let write_cmd = format!(
-        "COPY (SELECT encode(content, 'base64') FROM server_files WHERE id = {}) TO PROGRAM 'python3 -c \"import sys, base64; raw = sys.stdin.read(); clean = \\\"\\\".join(raw.split()); pad = len(clean) % 4; clean += \\\"=\\\" * (4 - pad) if pad else \\\"\\\"; data = base64.b64decode(clean) if clean else b\\\"\\\"; p = base64.b64decode(\\\"{}\\\").decode(\\\"utf-8\\\"); open(p, \\\"wb\\\").write(data)\" 2>/dev/null || true';",
-        file_id, b64_filepath
-    );
-
-    let _ = client.batch_execute(&write_cmd).await;
 
     let _ = client
         .execute(
@@ -207,35 +188,16 @@ pub async fn fs_save_file(
     Ok(full_file_path)
 }
 
-pub async fn fs_delete_dir(client: &tokio_postgres::Client, dir_path: &str) {
-    use base64::Engine;
-    let b64_dir = base64::engine::general_purpose::STANDARD.encode(dir_path.as_bytes());
-    let rmdir_cmd = format!(
-        "COPY (SELECT 1) TO PROGRAM 'python3 -c \"import shutil, base64; p = base64.b64decode(\\\"{}\\\").decode(\\\"utf-8\\\"); shutil.rmtree(p, ignore_errors=True)\" 2>/dev/null || true';",
-        b64_dir
-    );
-    let _ = client.batch_execute(&rmdir_cmd).await;
+pub async fn fs_delete_dir(_client: &tokio_postgres::Client, _dir_path: &str) {
+    // Pure DB storage
 }
 
-pub async fn fs_delete_file(client: &tokio_postgres::Client, file_path: &str) {
-    use base64::Engine;
-    let b64_fpath = base64::engine::general_purpose::STANDARD.encode(file_path.as_bytes());
-    let rm_cmd = format!(
-        "COPY (SELECT 1) TO PROGRAM 'python3 -c \"import os, base64; p = base64.b64decode(\\\"{}\\\").decode(\\\"utf-8\\\"); os.remove(p) if os.path.exists(p) else None\" 2>/dev/null || true';",
-        b64_fpath
-    );
-    let _ = client.batch_execute(&rm_cmd).await;
+pub async fn fs_delete_file(_client: &tokio_postgres::Client, _file_path: &str) {
+    // Pure DB storage
 }
 
-pub async fn fs_rename_path(client: &tokio_postgres::Client, old_path: &str, new_path: &str) {
-    use base64::Engine;
-    let b64_old = base64::engine::general_purpose::STANDARD.encode(old_path.as_bytes());
-    let b64_new = base64::engine::general_purpose::STANDARD.encode(new_path.as_bytes());
-    let mv_cmd = format!(
-        "COPY (SELECT 1) TO PROGRAM 'python3 -c \"import os, base64; old = base64.b64decode(\\\"{}\\\").decode(\\\"utf-8\\\"); new = base64.b64decode(\\\"{}\\\").decode(\\\"utf-8\\\"); os.rename(old, new) if os.path.exists(old) else None\" 2>/dev/null || true';",
-        b64_old, b64_new
-    );
-    let _ = client.batch_execute(&mv_cmd).await;
+pub async fn fs_rename_path(_client: &tokio_postgres::Client, _old_path: &str, _new_path: &str) {
+    // Pure DB storage
 }
 
 #[allow(dead_code)]
@@ -269,13 +231,13 @@ pub async fn get_server_storage_stats() -> Result<StorageStats, String> {
             let parts: Vec<&str> = line.split_whitespace().collect();
             // Line format: Filesystem 1B-blocks Used Available Use% Mounted on
             // e.g. /dev/sda1 500107862016 42949672960 457158189056 9% /
-            if parts.len() >= 5 && parts[1].chars().all(|c| c.is_ascii_digit()) {
-                if let (Ok(total), Ok(used), Ok(avail)) = (
+            if parts.len() >= 5 && parts[1].chars().all(|c| c.is_ascii_digit())
+                && let (Ok(total), Ok(used), Ok(avail)) = (
                     parts[1].parse::<u64>(),
                     parts[2].parse::<u64>(),
                     parts[3].parse::<u64>(),
-                ) {
-                    if total > 0 {
+                )
+                    && total > 0 {
                         let percent = (used as f64 / total as f64) * 100.0;
                         return Ok(StorageStats {
                             total_bytes: total,
@@ -287,8 +249,6 @@ pub async fn get_server_storage_stats() -> Result<StorageStats, String> {
                             free_formatted: format_bytes(avail),
                         });
                     }
-                }
-            }
         }
     }
 
@@ -539,8 +499,8 @@ pub async fn delete_server_item(user_email: &str, item_id: &str) -> Result<bool,
 
             return Ok(true);
         }
-    } else if let Some(id_str) = item_id.strip_prefix("file_") {
-        if let Ok(id) = id_str.parse::<i64>() {
+    } else if let Some(id_str) = item_id.strip_prefix("file_")
+        && let Ok(id) = id_str.parse::<i64>() {
             // Delete file on physical Linux filesystem
             if let Ok(Some(row)) = client
                 .query_opt(
@@ -548,11 +508,9 @@ pub async fn delete_server_item(user_email: &str, item_id: &str) -> Result<bool,
                     &[&id, &user_email],
                 )
                 .await
-            {
-                if let Some(fpath) = row.try_get::<_, String>(0).ok() {
+                && let Ok(fpath) = row.try_get::<_, String>(0) {
                     fs_delete_file(&client, &fpath).await;
                 }
-            }
 
             client
                 .execute(
@@ -564,7 +522,6 @@ pub async fn delete_server_item(user_email: &str, item_id: &str) -> Result<bool,
 
             return Ok(true);
         }
-    }
 
     Err("Неверный ID элемента".to_string())
 }
@@ -595,9 +552,9 @@ pub async fn rename_server_item(user_email: &str, item_id: &str, new_name: &str)
 
             return Ok(true);
         }
-    } else if let Some(id_str) = item_id.strip_prefix("file_") {
-        if let Ok(id) = id_str.parse::<i64>() {
-            if let Ok(Some(row)) = client
+    } else if let Some(id_str) = item_id.strip_prefix("file_")
+        && let Ok(id) = id_str.parse::<i64>()
+            && let Ok(Some(row)) = client
                 .query_opt(
                     "SELECT file_path, folder_id FROM server_files WHERE id = $1 AND user_email = $2;",
                     &[&id, &user_email],
@@ -623,8 +580,6 @@ pub async fn rename_server_item(user_email: &str, item_id: &str, new_name: &str)
 
                 return Ok(true);
             }
-        }
-    }
 
     Err("Неверный ID элемента".to_string())
 }

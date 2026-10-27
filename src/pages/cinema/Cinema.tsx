@@ -3,6 +3,12 @@ import Hls from "hls.js";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import {
+  playTvBeep as playTvBeepAudio,
+  playTvNavBeep,
+  playTvSelectBeep,
+  playTvBackBeep,
+} from "../../utils/tvAudio";
 import type {
   CinemaState,
   CinemaConfig,
@@ -540,7 +546,6 @@ export default function Cinema({
   }, [isTvEnvironment, isTvMode]);
   const [tvToast, setTvToast] = useState<{ text: string; icon?: string } | null>(null);
   const tvToastTimerRef = useRef<any>(null);
-  const audioCtxRef = useRef<AudioContext | null>(null);
 
   const showTvToast = useCallback((text: string, icon = "📺", duration = 2000) => {
     if (tvToastTimerRef.current) clearTimeout(tvToastTimerRef.current);
@@ -551,29 +556,7 @@ export default function Cinema({
   }, []);
 
   const playTvBeep = useCallback((freq = 580, duration = 0.035) => {
-    try {
-      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-      if (!AudioCtx) return;
-      if (!audioCtxRef.current) {
-        audioCtxRef.current = new AudioCtx();
-      }
-      const ctx = audioCtxRef.current;
-      if (ctx.state === "suspended") {
-        ctx.resume().catch(() => {});
-      }
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = "sine";
-      osc.frequency.setValueAtTime(freq, ctx.currentTime);
-      gain.gain.setValueAtTime(0.04, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + duration);
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start();
-      osc.stop(ctx.currentTime + duration);
-    } catch {
-      // AudioContext might be blocked until user gesture, ignore safely
-    }
+    playTvBeepAudio(freq, duration);
   }, []);
 
   const toggleTvMode = useCallback(() => {
@@ -630,6 +613,13 @@ export default function Cinema({
   const topRef = useRef<HTMLDivElement | null>(null);
   const hlsInstanceRef = useRef<Hls | null>(null);
   const aniLibriaReleasesCache = useRef<Map<number, any>>(new Map());
+
+  // Automatic Mirror Watchdog & Failover System (zero dropped playback)
+  const triedMirrorsRef = useRef<Set<BalancerMirror>>(new Set());
+  const mirrorWatchdogTimerRef = useRef<any>(null);
+  const [isMirrorConnecting, setIsMirrorConnecting] = useState<boolean>(false);
+  const [allMirrorsFailed, setAllMirrorsFailed] = useState<boolean>(false);
+  const currentPlaybackRef = useRef<{ currentTime: number; duration: number }>({ currentTime: 0, duration: 0 });
 
   // Detailed Movie / Series Information Modal State
   const [detailsMedia, setDetailsMedia] = useState<CinemaMediaItem | null>(null);
@@ -980,12 +970,12 @@ export default function Cinema({
       })
       .catch((err) => console.warn("Failed to get cinema config:", err));
 
-    invoke<CinemaState>("get_cinema_state")
+    invoke<CinemaState>("get_cinema_state", { userEmail: currentUser?.email })
       .then((state) => {
         if (state) setCinemaState(state);
       })
       .catch((err) => console.warn("Failed to get local cinema state:", err));
-  }, [isTauri, loadFullCatalog]);
+  }, [isTauri, loadFullCatalog, currentUser?.email]);
 
   // Search TMDB live across all movies, series, and anime (only released and verified playable titles)
   const executeSearch = useCallback(
@@ -1085,12 +1075,13 @@ export default function Cinema({
 
   const isBookmarked = cinemaState.bookmarks.includes(selectedMedia.id);
 
-  // Toggle Bookmark (Saved locally on user's computer in cinema_state.json)
+  // Toggle Bookmark (Saved locally on user's computer and synced to PostgreSQL)
   const handleToggleBookmark = async () => {
     if (isTauri) {
       try {
         const nextState = await invoke<CinemaState>("toggle_cinema_bookmark", {
           titleId: selectedMedia.id,
+          userEmail: currentUser?.email,
         });
         setCinemaState(nextState);
       } catch (err) {
@@ -1243,6 +1234,81 @@ export default function Cinema({
     };
   }, [selectedMirror, anilibriaStreamUrl]);
 
+  // List of all available mirrors sorted with preferred options first
+  const getAvailableMirrorsList = useCallback((): BalancerMirror[] => {
+    const activeMedia = playingMedia || selectedMedia;
+    const isAnime =
+      activeMedia?.genre?.toLowerCase().includes("аниме") ||
+      activeMedia?.genre?.toLowerCase().includes("anime") ||
+      activeMedia?.title?.toLowerCase().includes("клинок") ||
+      (activeMedia?.original_title || "").toLowerCase().includes("kimetsu");
+
+    const mirrors: BalancerMirror[] = [];
+    if (isAnime && anilibriaStreamUrl) mirrors.push("anilibria");
+    if (currentAllohaUrl) mirrors.push("alloha_ru");
+    if (kodikResults.length > 0 || isAnime) mirrors.push("kodik_ru");
+    mirrors.push("vidlink_pro");
+    if (!mirrors.includes("alloha_ru")) mirrors.push("alloha_ru");
+    if (!mirrors.includes("kodik_ru")) mirrors.push("kodik_ru");
+    mirrors.push("autoembed");
+    mirrors.push("vidsrc_pm");
+    mirrors.push("multiembed");
+    mirrors.push("vidsrc_to");
+
+    return Array.from(new Set(mirrors));
+  }, [playingMedia, selectedMedia, anilibriaStreamUrl, currentAllohaUrl, kodikResults]);
+
+  // Automatic Failover Watchdog: seamlessly switches to the next mirror if a server stalls or throws error
+  const handleAutoSwitchNextMirror = useCallback((reason: string) => {
+    if (mirrorWatchdogTimerRef.current) {
+      clearTimeout(mirrorWatchdogTimerRef.current);
+      mirrorWatchdogTimerRef.current = null;
+    }
+
+    const available = getAvailableMirrorsList();
+    triedMirrorsRef.current.add(selectedMirror);
+
+    const nextUntried = available.find((m) => !triedMirrorsRef.current.has(m));
+
+    if (nextUntried) {
+      console.log(`[Cinema Failover] ${reason}. Auto-switching to:`, nextUntried);
+      setSelectedMirror(nextUntried);
+      setIsMirrorConnecting(true);
+      setAllMirrorsFailed(false);
+
+      const labels: Record<BalancerMirror, string> = {
+        vidlink_pro: "Сервер 1: VidLink Pro (1080p)",
+        kodik_ru: "Сервер 2: Kodik (Студии озвучки)",
+        autoembed: "Сервер 3: AutoEmbed",
+        vidsrc_pm: "Сервер 4: VidSrc Pro",
+        multiembed: "Сервер 5: MultiStream VIP",
+        vidsrc_to: "Сервер 6: VidSrc To",
+        alloha_ru: "Сервер 7: Alloha",
+        anilibria: "Сервер 8: AniLibria HLS",
+        embess_ru: "Embess",
+        smotrim_ru: "Smotrim",
+      };
+
+      showTvToast(`Автопереключение: ${labels[nextUntried] || nextUntried}`, "🔄", 2500);
+
+      mirrorWatchdogTimerRef.current = setTimeout(() => {
+        handleAutoSwitchNextMirror("Сервер не ответил за 8 секунд");
+      }, 8000);
+    } else {
+      setIsMirrorConnecting(false);
+      setAllMirrorsFailed(true);
+      showTvToast("Все серверы временно недоступны. Нажмите «Попробовать снова».", "⚠️", 3500);
+    }
+  }, [selectedMirror, getAvailableMirrorsList, showTvToast]);
+
+  const handleIframeLoaded = useCallback(() => {
+    if (mirrorWatchdogTimerRef.current) {
+      clearTimeout(mirrorWatchdogTimerRef.current);
+      mirrorWatchdogTimerRef.current = null;
+    }
+    setIsMirrorConnecting(false);
+  }, []);
+
   // Start playback for a media item (movie or specific series episode)
   const startPlayback = (media: CinemaMediaItem, seasonNum: number = 1, episode?: CinemaEpisode) => {
     setSelectedMedia(media);
@@ -1267,6 +1333,22 @@ export default function Cinema({
       };
     setPlayingEpisode(ep);
 
+    // Track playback starting point from synchronized history
+    const existingProg = cinemaState.history.find(
+      (h) => h.title_id === media.id && h.season === seasonNum && h.episode === ep.number
+    );
+    if (existingProg && existingProg.progress_seconds > 0) {
+      currentPlaybackRef.current = {
+        currentTime: existingProg.progress_seconds,
+        duration: existingProg.duration_seconds || (ep.duration_minutes ? ep.duration_minutes * 60 : 7200),
+      };
+    } else {
+      currentPlaybackRef.current = {
+        currentTime: 0,
+        duration: ep.duration_minutes ? ep.duration_minutes * 60 : (media.duration_minutes ? media.duration_minutes * 60 : 7200),
+      };
+    }
+
     const isAnime =
       media.genre?.toLowerCase().includes("аниме") ||
       media.genre?.toLowerCase().includes("cartoon") ||
@@ -1282,6 +1364,18 @@ export default function Cinema({
     }
     setCurrentImdbId(null);
     setCurrentAllohaUrl(null);
+
+    // Reset mirror tracking and watchdog for fresh playback session
+    triedMirrorsRef.current.clear();
+    setAllMirrorsFailed(false);
+    setIsMirrorConnecting(true);
+
+    if (mirrorWatchdogTimerRef.current) {
+      clearTimeout(mirrorWatchdogTimerRef.current);
+    }
+    mirrorWatchdogTimerRef.current = setTimeout(() => {
+      handleAutoSwitchNextMirror("Сервер не ответил за 8 секунд (автопереключение)");
+    }, 8000);
 
     // Default to verified reliable high-speed 1080p stream:
     if (isAnime) {
@@ -1390,6 +1484,7 @@ export default function Cinema({
       try {
         const nextState = await invoke<CinemaState>("toggle_cinema_bookmark", {
           titleId: mediaId,
+          userEmail: currentUser?.email,
         });
         setCinemaState(nextState);
       } catch (err) {
@@ -1476,21 +1571,19 @@ export default function Cinema({
 
   // Quick 1-click multi-source switcher with automatic fallback
   const handleCycleMirror = () => {
-    const mirrors: BalancerMirror[] = [
-      "vidlink_pro",
-      "kodik_ru",
-      "autoembed",
-      "vidsrc_pm",
-      "multiembed",
-      "vidsrc_to",
-    ];
-    if (currentAllohaUrl) mirrors.push("alloha_ru");
-    if (anilibriaStreamUrl) mirrors.push("anilibria");
+    if (mirrorWatchdogTimerRef.current) {
+      clearTimeout(mirrorWatchdogTimerRef.current);
+      mirrorWatchdogTimerRef.current = null;
+    }
 
+    const mirrors = getAvailableMirrorsList();
     const currentIndex = mirrors.indexOf(selectedMirror);
     const nextIndex = (currentIndex + 1) % mirrors.length;
     const nextMirror = mirrors[nextIndex];
     setSelectedMirror(nextMirror);
+    setAllMirrorsFailed(false);
+    setIsMirrorConnecting(true);
+    triedMirrorsRef.current.add(nextMirror);
 
     const labels: Record<BalancerMirror, string> = {
       vidlink_pro: "Сервер 1: VidLink Pro (1080p)",
@@ -1506,6 +1599,10 @@ export default function Cinema({
     };
     showTvToast(`Переключено на: ${labels[nextMirror] || nextMirror}`, "🔄", 2200);
     resetHudTimer();
+
+    mirrorWatchdogTimerRef.current = setTimeout(() => {
+      handleAutoSwitchNextMirror("Сервер не ответил за 8 секунд");
+    }, 8000);
   };
 
   // Save playback progress on time update
@@ -1514,6 +1611,7 @@ export default function Cinema({
     const currentTime = videoRef.current.currentTime;
     const duration = videoRef.current.duration;
     const activeMedia = playingMedia || selectedMedia;
+    currentPlaybackRef.current = { currentTime, duration };
 
     if (duration > 0 && isTauri) {
       const payload: CinemaPlayback = {
@@ -1523,13 +1621,13 @@ export default function Cinema({
         backdrop_path: activeMedia.backdrop_url,
         season: playingSeasonNumber,
         episode: playingEpisode.number,
-        progress_seconds: currentTime,
-        duration_seconds: duration,
+        progress_seconds: Math.round(currentTime),
+        duration_seconds: Math.round(duration),
         last_watched: new Date().toISOString(),
       };
 
       if (Math.floor(currentTime) % 5 === 0) {
-        invoke<CinemaState>("update_cinema_progress", { item: payload })
+        invoke<CinemaState>("update_cinema_progress", { item: payload, userEmail: currentUser?.email })
           .then((st) => setCinemaState(st))
           .catch(() => {});
       }
@@ -1539,6 +1637,13 @@ export default function Cinema({
   // Close player and save exact position
   const handleClosePlayer = useCallback(() => {
     const activeMedia = playingMedia || selectedMedia;
+    if (mirrorWatchdogTimerRef.current) {
+      clearTimeout(mirrorWatchdogTimerRef.current);
+      mirrorWatchdogTimerRef.current = null;
+    }
+    setIsMirrorConnecting(false);
+    triedMirrorsRef.current.clear();
+
     try {
       if (isTauri && isFullscreen) {
         try {
@@ -1548,11 +1653,19 @@ export default function Cinema({
       }
     } catch {}
 
-    if (videoRef.current && playingEpisode && isTauri) {
+    if (playingEpisode && isTauri && activeMedia) {
       try {
-        const currentTime = videoRef.current.currentTime;
-        const duration = videoRef.current.duration;
-        if (duration > 0 && activeMedia) {
+        let currentTime = currentPlaybackRef.current.currentTime;
+        let duration = currentPlaybackRef.current.duration;
+        if (videoRef.current && videoRef.current.duration > 0) {
+          currentTime = videoRef.current.currentTime;
+          duration = videoRef.current.duration;
+        }
+        if (duration <= 0) {
+          duration = (playingEpisode.duration_minutes || activeMedia.duration_minutes || (activeMedia.media_type === "movie" ? 120 : 45)) * 60;
+        }
+
+        if (currentTime > 5) {
           const payload: CinemaPlayback = {
             title_id: activeMedia.id,
             title_name: activeMedia.title,
@@ -1560,11 +1673,11 @@ export default function Cinema({
             backdrop_path: activeMedia.backdrop_url,
             season: playingSeasonNumber,
             episode: playingEpisode.number,
-            progress_seconds: currentTime,
-            duration_seconds: duration,
+            progress_seconds: Math.round(currentTime),
+            duration_seconds: Math.round(duration),
             last_watched: new Date().toISOString(),
           };
-          invoke<CinemaState>("update_cinema_progress", { item: payload })
+          invoke<CinemaState>("update_cinema_progress", { item: payload, userEmail: currentUser?.email })
             .then((st) => setCinemaState(st))
             .catch(() => {});
         }
@@ -1598,7 +1711,99 @@ export default function Cinema({
     setSelectedKodikLink(null);
     setRussianDubNotice(null);
     setAnilibriaStreamUrl(null);
-  }, [isTauri, isFullscreen, playingEpisode, playingMedia, selectedMedia, playingSeasonNumber]);
+  }, [isTauri, isFullscreen, playingEpisode, playingMedia, selectedMedia, playingSeasonNumber, currentUser?.email]);
+
+  // Synchronize playback progress across devices even for embedded players (iframes)
+  useEffect(() => {
+    if (!playingEpisode) return;
+
+    const interval = setInterval(() => {
+      const activeMedia = playingMedia || selectedMedia;
+      if (!activeMedia) return;
+
+      if (videoRef.current && videoRef.current.duration > 0) {
+        currentPlaybackRef.current.currentTime = videoRef.current.currentTime;
+        currentPlaybackRef.current.duration = videoRef.current.duration;
+      } else if (playerMode === "balancer" && !allMirrorsFailed) {
+        currentPlaybackRef.current.currentTime += 5;
+      }
+
+      const cur = currentPlaybackRef.current.currentTime;
+      const dur = currentPlaybackRef.current.duration || 7200;
+
+      if (cur >= 5 && isTauri) {
+        const payload: CinemaPlayback = {
+          title_id: activeMedia.id,
+          title_name: activeMedia.title,
+          poster_path: activeMedia.poster_url,
+          backdrop_path: activeMedia.backdrop_url,
+          season: playingSeasonNumber,
+          episode: playingEpisode.number,
+          progress_seconds: Math.round(cur),
+          duration_seconds: Math.round(dur),
+          last_watched: new Date().toISOString(),
+        };
+
+        invoke<CinemaState>("update_cinema_progress", {
+          item: payload,
+          userEmail: currentUser?.email,
+        })
+          .then((st) => setCinemaState(st))
+          .catch(() => {});
+      }
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [playingEpisode, playerMode, allMirrorsFailed, playingMedia, selectedMedia, playingSeasonNumber, isTauri, currentUser?.email]);
+
+  // Listen to postMessage from embedded players (VidLink, Kodik, Alloha)
+  useEffect(() => {
+    const handleWindowMessage = (e: MessageEvent) => {
+      try {
+        let data = e.data;
+        if (typeof data === "string" && (data.startsWith("{") || data.startsWith("["))) {
+          try {
+            data = JSON.parse(data);
+          } catch {}
+        }
+        if (!data || typeof data !== "object") return;
+
+        // VidLink postMessage
+        if (data.type === "MEDIA_DATA" && data.data) {
+          if (typeof data.data.currentTime === "number" && data.data.currentTime > 0) {
+            currentPlaybackRef.current.currentTime = data.data.currentTime;
+          }
+          if (typeof data.data.duration === "number" && data.data.duration > 0) {
+            currentPlaybackRef.current.duration = data.data.duration;
+          }
+          handleIframeLoaded();
+        }
+
+        // Kodik postMessage
+        if (data.key === "kodik_player_time_update" && data.value) {
+          if (typeof data.value.time === "number" && data.value.time > 0) {
+            currentPlaybackRef.current.currentTime = data.value.time;
+          }
+          if (typeof data.value.duration === "number" && data.value.duration > 0) {
+            currentPlaybackRef.current.duration = data.value.duration;
+          }
+          handleIframeLoaded();
+        }
+
+        // Generic timeupdate
+        if ((data.event === "timeUpdate" || data.type === "timeupdate") && typeof data.time === "number") {
+          currentPlaybackRef.current.currentTime = data.time;
+          if (typeof data.duration === "number") {
+            currentPlaybackRef.current.duration = data.duration;
+          }
+          handleIframeLoaded();
+        }
+      } catch {}
+    };
+
+    window.addEventListener("message", handleWindowMessage);
+    return () => window.removeEventListener("message", handleWindowMessage);
+  }, [handleIframeLoaded]);
 
   // D-Pad Spatial Navigation & TV Remote Key Handler
   const handleRemoteKeyDown = useCallback(
@@ -1623,6 +1828,13 @@ export default function Cinema({
         e.key === "BrowserBack" ||
         e.keyCode === 4 ||
         e.keyCode === 27;
+      const isOk =
+        e.key === "Enter" ||
+        e.key === "Select" ||
+        e.key === "Accept" ||
+        e.keyCode === 13 ||
+        e.keyCode === 23 ||
+        e.keyCode === 66;
       const isPlayPause =
         e.key === "MediaPlayPause" || e.keyCode === 85 || e.keyCode === 179;
       const isFastForward = e.key === "MediaFastForward" || e.keyCode === 90;
@@ -1640,7 +1852,7 @@ export default function Cinema({
                 document.querySelector<HTMLElement>(".has-cinema-tv-nav-item");
               if (navBtn) {
                 navBtn.focus();
-                playTvBeep(640, 0.03);
+                playTvNavBeep();
               }
             }, 30);
           }
@@ -1672,7 +1884,7 @@ export default function Cinema({
           }
           handleClosePlayer();
           showTvToast("Плеер закрыт", "✕", 1500);
-          playTvBeep(400, 0.05);
+          playTvBackBeep();
           return;
         }
 
@@ -1690,22 +1902,83 @@ export default function Cinema({
             const backBtn = document.querySelector<HTMLElement>(".has-cinema-player-btn-back");
             if (backBtn) {
               backBtn.focus();
-              playTvBeep(640, 0.03);
+              playTvNavBeep();
             }
           }, 40);
           return;
         }
 
-        // Pressing OK / Enter when HUD is idle wakes up the full HUD
-        if ((e.key === "Enter" || e.keyCode === 13) && !isHudVisible && !videoRef.current) {
-          e.preventDefault();
-          setIsHudVisible(true);
-          resetHudTimer();
-          setTimeout(() => {
-            const backBtn = document.querySelector<HTMLElement>(".has-cinema-player-btn-back");
-            if (backBtn) backBtn.focus();
-          }, 40);
-          return;
+        // Pressing ArrowDown on TV remote reveals HUD and focuses server mirror pills / episodes
+        if (
+          e.key === "ArrowDown" ||
+          e.keyCode === 20 ||
+          e.keyCode === 40
+        ) {
+          const isAtBottom = document.activeElement?.closest(".has-cinema-player-server-pill, .has-cinema-player-hud-btn");
+          if (!isAtBottom || !isHudVisible) {
+            e.preventDefault();
+            setIsHudVisible(true);
+            resetHudTimer();
+            setTimeout(() => {
+              const serverPill =
+                document.querySelector<HTMLElement>(".has-cinema-player-server-pill.active") ||
+                document.querySelector<HTMLElement>(".has-cinema-player-server-pill") ||
+                document.querySelector<HTMLElement>(".has-cinema-player-hud-btn");
+              if (serverPill) {
+                serverPill.focus();
+                playTvNavBeep();
+              }
+            }, 40);
+            return;
+          }
+        }
+
+        // Pressing OK / Enter / Center button in player
+        if (isOk) {
+          const active = document.activeElement as HTMLElement | null;
+          const isButtonFocused =
+            active &&
+            (active.tagName === "BUTTON" ||
+              active.getAttribute("role") === "button" ||
+              active.hasAttribute("data-tv-focusable"));
+
+          if (!isHudVisible) {
+            e.preventDefault();
+            setIsHudVisible(true);
+            resetHudTimer();
+            if (videoRef.current) {
+              if (videoRef.current.paused) {
+                videoRef.current.play().catch(() => {});
+                showTvToast("Воспроизведение", "▶", 1200);
+              } else {
+                videoRef.current.pause();
+                showTvToast("Пауза", "⏸", 1200);
+              }
+              playTvSelectBeep();
+            }
+            return;
+          }
+
+          if (isButtonFocused && active) {
+            // Let the button click handler do its work, give audio feedback
+            playTvSelectBeep();
+            active.click();
+            e.preventDefault();
+            return;
+          }
+
+          if (videoRef.current) {
+            e.preventDefault();
+            if (videoRef.current.paused) {
+              videoRef.current.play().catch(() => {});
+              showTvToast("Воспроизведение", "▶", 1200);
+            } else {
+              videoRef.current.pause();
+              showTvToast("Пауза", "⏸", 1200);
+            }
+            playTvSelectBeep();
+            return;
+          }
         }
 
         if (isPlayPause || (e.code === "Space" && !isInput)) {
@@ -1718,7 +1991,7 @@ export default function Cinema({
               videoRef.current.pause();
               showTvToast("Пауза", "⏸", 1200);
             }
-            playTvBeep(560, 0.04);
+            playTvSelectBeep();
           }
           return;
         }
@@ -1727,7 +2000,7 @@ export default function Cinema({
           isFastForward ||
           (e.key === "ArrowRight" &&
             !isInput &&
-            !document.activeElement?.closest(".has-cinema-player-modal"))
+            !document.activeElement?.closest(".has-cinema-player-modal .has-cinema-player-hud-btn, .has-cinema-player-server-pill"))
         ) {
           if (videoRef.current) {
             e.preventDefault();
@@ -1736,7 +2009,7 @@ export default function Cinema({
               videoRef.current.currentTime + 10
             );
             showTvToast("+10 сек", "⏩", 1000);
-            playTvBeep(520, 0.03);
+            playTvNavBeep();
             return;
           }
         }
@@ -1745,7 +2018,7 @@ export default function Cinema({
           isRewind ||
           (e.key === "ArrowLeft" &&
             !isInput &&
-            !document.activeElement?.closest(".has-cinema-player-modal"))
+            !document.activeElement?.closest(".has-cinema-player-modal .has-cinema-player-hud-btn, .has-cinema-player-server-pill"))
         ) {
           if (videoRef.current) {
             e.preventDefault();
@@ -1754,7 +2027,24 @@ export default function Cinema({
               videoRef.current.currentTime - 10
             );
             showTvToast("-10 сек", "⏪", 1000);
-            playTvBeep(480, 0.03);
+            playTvNavBeep();
+            return;
+          }
+        }
+      }
+
+      // 2. OK / Select Button outside player (Immediate activation of focused card/button/tab/chip)
+      if (isOk && !isInput) {
+        const active = document.activeElement as HTMLElement | null;
+        if (active && active !== document.body) {
+          if (
+            active.matches(
+              'button, a, [data-tv-focusable="true"], .has-cinema-nav-item, .has-cinema-tv-nav-item, .has-cinema-btn-play, .has-cinema-btn-bookmark, .has-cinema-media-card, .has-cinema-grid-card, .has-cinema-episode-card, .has-cinema-drawer-option-btn, .has-cinema-drawer-chip, .has-cinema-drawer-ep-btn, .has-cinema-season-tab, .has-cinema-details-btn-play, .has-cinema-details-close-btn, .has-cinema-details-btn-bookmark, .has-cinema-details-btn-trailer, .has-cinema-actor-card, .has-cinema-btn-info-wide'
+            )
+          ) {
+            e.preventDefault();
+            playTvSelectBeep();
+            active.click();
             return;
           }
         }
@@ -2128,7 +2418,20 @@ export default function Cinema({
 
   // Switch mirror manually
   const handleSelectMirror = async (mirrorId: BalancerMirror) => {
+    if (mirrorWatchdogTimerRef.current) {
+      clearTimeout(mirrorWatchdogTimerRef.current);
+      mirrorWatchdogTimerRef.current = null;
+    }
     setSelectedMirror(mirrorId);
+    setAllMirrorsFailed(false);
+    setIsMirrorConnecting(true);
+    triedMirrorsRef.current.add(mirrorId);
+
+    // Watchdog for manually chosen mirror (8 seconds)
+    mirrorWatchdogTimerRef.current = setTimeout(() => {
+      handleAutoSwitchNextMirror("Сервер не ответил за 8 секунд");
+    }, 8000);
+
     if (mirrorId === "anilibria") {
       const activeMedia = playingMedia || selectedMedia;
       const epNum = playingEpisode?.number || 1;
@@ -2136,6 +2439,11 @@ export default function Cinema({
       if (stream) {
         setAnilibriaStreamUrl(stream);
         setRussianDubNotice("🌸 Подключен поток AniLibria Full HD (Studio Band).");
+        if (mirrorWatchdogTimerRef.current) {
+          clearTimeout(mirrorWatchdogTimerRef.current);
+          mirrorWatchdogTimerRef.current = null;
+        }
+        setIsMirrorConnecting(false);
       }
     } else {
       setAnilibriaStreamUrl(null);
@@ -2905,6 +3213,38 @@ export default function Cinema({
                           ].find((item) => item.id === h.title_id);
                           if (found) {
                             handleMediaCardClick(found);
+                          } else {
+                            const tmdbMatch = h.title_id.match(/tmdb-(movie|tv)-(\d+)/);
+                            const isTv = tmdbMatch ? tmdbMatch[1] === "tv" : h.season > 0 && h.episode > 0;
+                            const tmdbId = tmdbMatch ? parseInt(tmdbMatch[2], 10) : undefined;
+                            const fallbackItem: CinemaMediaItem = {
+                              id: h.title_id,
+                              tmdb_id: tmdbId,
+                              media_type: isTv ? "tv" : "movie",
+                              title: h.title_name,
+                              poster_url: h.poster_path || INITIAL_LIBRARY[0].poster_url,
+                              backdrop_url: h.backdrop_path || INITIAL_LIBRARY[0].backdrop_url,
+                              genre: isTv ? "Сериал" : "Фильм",
+                              synopsis: `Продолжение просмотра: ${h.title_name}`,
+                              release_year: "2024",
+                              rating: 8.5,
+                              is_original: false,
+                              seasons: [
+                                {
+                                  season_number: h.season || 1,
+                                  episodes: [
+                                    {
+                                      id: `ep-${h.title_id}-${h.season}-${h.episode}`,
+                                      number: h.episode || 1,
+                                      title: `Серия ${h.episode || 1}`,
+                                      thumbnail: h.poster_path || INITIAL_LIBRARY[0].poster_url,
+                                      duration_minutes: Math.round((h.duration_seconds || 3600) / 60),
+                                    },
+                                  ],
+                                },
+                              ],
+                            };
+                            handleMediaCardClick(fallbackItem);
                           }
                         }}
                         data-tv-focusable="true"
@@ -2921,6 +3261,38 @@ export default function Cinema({
                             ].find((item) => item.id === h.title_id);
                             if (found) {
                               handleMediaCardClick(found);
+                            } else {
+                              const tmdbMatch = h.title_id.match(/tmdb-(movie|tv)-(\d+)/);
+                              const isTv = tmdbMatch ? tmdbMatch[1] === "tv" : h.season > 0 && h.episode > 0;
+                              const tmdbId = tmdbMatch ? parseInt(tmdbMatch[2], 10) : undefined;
+                              const fallbackItem: CinemaMediaItem = {
+                                id: h.title_id,
+                                tmdb_id: tmdbId,
+                                media_type: isTv ? "tv" : "movie",
+                                title: h.title_name,
+                                poster_url: h.poster_path || INITIAL_LIBRARY[0].poster_url,
+                                backdrop_url: h.backdrop_path || INITIAL_LIBRARY[0].backdrop_url,
+                                genre: isTv ? "Сериал" : "Фильм",
+                                synopsis: `Продолжение просмотра: ${h.title_name}`,
+                                release_year: "2024",
+                                rating: 8.5,
+                                is_original: false,
+                                seasons: [
+                                  {
+                                    season_number: h.season || 1,
+                                    episodes: [
+                                      {
+                                        id: `ep-${h.title_id}-${h.season}-${h.episode}`,
+                                        number: h.episode || 1,
+                                        title: `Серия ${h.episode || 1}`,
+                                        thumbnail: h.poster_path || INITIAL_LIBRARY[0].poster_url,
+                                        duration_minutes: Math.round((h.duration_seconds || 3600) / 60),
+                                      },
+                                    ],
+                                  },
+                                ],
+                              };
+                              handleMediaCardClick(fallbackItem);
                             }
                           }
                         }}
@@ -3812,6 +4184,13 @@ export default function Cinema({
 
           {/* Clean 100% Video Canvas */}
           <div className="has-cinema-video-frame">
+            {isMirrorConnecting && (
+              <div className="has-cinema-mirror-connecting-banner">
+                <div className="has-cinema-loading-spinner small" />
+                <span>Защита от сбоев: подключение к серверу...</span>
+              </div>
+            )}
+
             {(playingMedia || selectedMedia).is_unreleased ? (
               <div className="has-cinema-unreleased-player-view">
                 <div className="has-cinema-unreleased-card">
@@ -3846,6 +4225,38 @@ export default function Cinema({
                   </button>
                 </div>
               </div>
+            ) : allMirrorsFailed ? (
+              <div className="has-cinema-unreleased-player-view">
+                <div className="has-cinema-unreleased-card">
+                  <span className="unreleased-icon">🛡️</span>
+                  <h3>Все доступные серверы были проверены</h3>
+                  <p>
+                    Видеопоток временно не ответил ни на одном из зеркал (возможно блокировка провайдера). Вы можете запустить повторную проверку или вернуться в каталог.
+                  </p>
+                  <div style={{ display: "flex", gap: "12px", justifyContent: "center", marginTop: "14px" }}>
+                    <button
+                      type="button"
+                      className="has-cinema-btn-play"
+                      onClick={() => {
+                        triedMirrorsRef.current.clear();
+                        setAllMirrorsFailed(false);
+                        handleSelectMirror("vidlink_pro");
+                      }}
+                      data-tv-focusable="true"
+                    >
+                      🔄 Попробовать заново
+                    </button>
+                    <button
+                      type="button"
+                      className="failover-btn"
+                      onClick={handleClosePlayer}
+                      data-tv-focusable="true"
+                    >
+                      ← Закрыть плеер
+                    </button>
+                  </div>
+                </div>
+              </div>
             ) : selectedMirror === "anilibria" ? (
               anilibriaStreamUrl ? (
                 <video
@@ -3876,6 +4287,8 @@ export default function Cinema({
                 allow="autoplay *; fullscreen *; encrypted-media *; picture-in-picture *; clipboard-write *"
                 referrerPolicy="no-referrer-when-downgrade"
                 allowFullScreen
+                onLoad={handleIframeLoaded}
+                onError={() => handleAutoSwitchNextMirror("Сервер вернул ошибку")}
                 {...{ webkitallowfullscreen: "true", mozallowfullscreen: "true" }}
               />
             ) : (

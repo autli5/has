@@ -85,8 +85,8 @@ pub fn load_env() {
     let _ = dotenvy::from_filename("../.env");
 
     // 3. Executable directory .env (useful in production bundle)
-    if let Ok(exe_path) = env::current_exe() {
-        if let Some(exe_dir) = exe_path.parent() {
+    if let Ok(exe_path) = env::current_exe()
+        && let Some(exe_dir) = exe_path.parent() {
             let _ = dotenvy::from_path(exe_dir.join(".env"));
             if let Some(parent) = exe_dir.parent() {
                 let _ = dotenvy::from_path(parent.join(".env"));
@@ -95,7 +95,6 @@ pub fn load_env() {
                 }
             }
         }
-    }
 }
 
 pub fn extract_clean_env(key: &str, default: &str) -> String {
@@ -153,11 +152,10 @@ pub fn get_db_config() -> DbConfig {
 }
 
 fn build_conn_string(config: &DbConfig) -> String {
-    if let Some(url) = &config.database_url {
-        if !url.trim().is_empty() {
+    if let Some(url) = &config.database_url
+        && !url.trim().is_empty() {
             return url.clone();
         }
-    }
 
     let mut parts = vec![
         format!("host={}", config.host),
@@ -166,11 +164,10 @@ fn build_conn_string(config: &DbConfig) -> String {
         format!("dbname={}", config.dbname),
     ];
 
-    if let Some(ref pwd) = config.password {
-        if !pwd.is_empty() {
+    if let Some(ref pwd) = config.password
+        && !pwd.is_empty() {
             parts.push(format!("password={}", pwd));
         }
-    }
 
     parts.join(" ")
 }
@@ -271,11 +268,10 @@ pub fn verify_password(provided: &str, stored: &str) -> bool {
     let stored = stored.trim();
 
     // 1. Bcrypt hash check ($2a$, $2b$, $2y$)
-    if stored.starts_with("$2a$") || stored.starts_with("$2b$") || stored.starts_with("$2y$") {
-        if let Ok(valid) = bcrypt::verify(provided, stored) {
+    if (stored.starts_with("$2a$") || stored.starts_with("$2b$") || stored.starts_with("$2y$"))
+        && let Ok(valid) = bcrypt::verify(provided, stored) {
             return valid;
         }
-    }
 
     // 2. SHA-256 hash check (64 hex characters)
     if stored.len() == 64 && stored.chars().all(|c| c.is_ascii_hexdigit()) {
@@ -578,6 +574,16 @@ pub fn validate_email_syntax(email: &str) -> Result<(&str, &str), String> {
         }
     }
 
+    let typo_suggestion = match domain.to_lowercase().as_str() {
+        "gmai.com" | "gamil.com" | "gmial.com" | "gmaill.com" => Some("gmail.com"),
+        "yandx.ru" | "yandx.com" | "yadecs.ru" | "yadex.ru" => Some("yandex.ru"),
+        "mil.ru" | "mai.ru" | "maill.ru" => Some("mail.ru"),
+        _ => None,
+    };
+    if let Some(suggested) = typo_suggestion {
+        return Err(format!("Возможно, опечатка в домене '{}'. Вы имели в виду '{}'?", domain, suggested));
+    }
+
     const DISPOSABLE_DOMAINS: &[&str] = &[
         "tempmail.com", "10minutemail.com", "guerrillamail.com", "mailinator.com",
         "trashmail.com", "yopmail.com", "temp-mail.org", "dispostable.com",
@@ -587,7 +593,7 @@ pub fn validate_email_syntax(email: &str) -> Result<(&str, &str), String> {
     ];
     let domain_lower = domain.to_lowercase();
     if DISPOSABLE_DOMAINS.iter().any(|&d| domain_lower == d || domain_lower.ends_with(&format!(".{}", d))) {
-        return Err("Временные и одноразовые почтовые ящики не поддерживаются. Пожалуйста, используйте надежный адрес.".to_string());
+        return Err("Временные и одноразовые почтовые ящики не поддерживаются. Пожалуйста, используйте действительный личный адрес.".to_string());
     }
 
     Ok((local, domain))
@@ -610,6 +616,189 @@ pub async fn verify_domain_exists(domain: &str) -> Result<(), String> {
         return Err(format!("Почтовый домен '{}' не найден в сети Интернет. Проверьте правильность адреса.", domain));
     }
     Ok(())
+}
+
+pub async fn check_mailru_api(email: &str) -> Result<bool, String> {
+    let url = format!("https://account.mail.ru/api/v1/user/exists?email={}", email);
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(4))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let res = client
+        .get(&url)
+        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let json: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
+    if let Some(exists) = json.get("body").and_then(|b| b.get("exists")).and_then(|e| e.as_bool()) {
+        Ok(exists)
+    } else {
+        Ok(true)
+    }
+}
+
+pub async fn check_smtp_mailbox_rcpt(host_port: &str, email: &str) -> Result<bool, String> {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    use tokio::net::TcpStream;
+    use tokio::time::timeout;
+
+    let fut = async {
+        let stream = TcpStream::connect(host_port).await.map_err(|e| e.to_string())?;
+        let (reader, mut writer) = stream.into_split();
+        let mut reader = BufReader::new(reader);
+
+        async fn read_smtp_reply<R: AsyncBufReadExt + Unpin>(reader: &mut R) -> Result<(u16, String), String> {
+            let mut last_line;
+            loop {
+                let mut line = String::new();
+                let n = reader.read_line(&mut line).await.map_err(|e| e.to_string())?;
+                if n == 0 {
+                    return Err("Connection closed".to_string());
+                }
+                last_line = line.clone();
+                if line.len() >= 4 && line[..3].chars().all(|c| c.is_ascii_digit()) && line.as_bytes()[3] == b' ' {
+                    break;
+                }
+                if line.len() >= 3 && line[..3].chars().all(|c| c.is_ascii_digit()) && line.len() < 4 {
+                    break;
+                }
+            }
+            let code = last_line.get(..3).and_then(|c| c.parse::<u16>().ok()).unwrap_or(0);
+            Ok((code, last_line))
+        }
+
+        let (code, _) = read_smtp_reply(&mut reader).await?;
+        if code != 220 {
+            return Err("Invalid banner".to_string());
+        }
+
+        writer.write_all(b"EHLO mail.ru\r\n").await.map_err(|e| e.to_string())?;
+        writer.flush().await.map_err(|e| e.to_string())?;
+        let (code, _) = read_smtp_reply(&mut reader).await?;
+        if code != 250 {
+            return Err("EHLO rejected".to_string());
+        }
+
+        writer.write_all(b"MAIL FROM:<scorporation@internet.ru>\r\n").await.map_err(|e| e.to_string())?;
+        writer.flush().await.map_err(|e| e.to_string())?;
+        let (code, _) = read_smtp_reply(&mut reader).await?;
+        if code != 250 {
+            return Err("MAIL FROM rejected".to_string());
+        }
+
+        let rcpt_cmd = format!("RCPT TO:<{}>\r\n", email);
+        writer.write_all(rcpt_cmd.as_bytes()).await.map_err(|e| e.to_string())?;
+        writer.flush().await.map_err(|e| e.to_string())?;
+        let (code, line) = read_smtp_reply(&mut reader).await?;
+
+        let _ = writer.write_all(b"QUIT\r\n").await;
+        let _ = writer.flush().await;
+
+        let line_lower = line.to_lowercase();
+        if code == 550 || code == 551 || code == 552 || code == 553 || code == 554 
+            || line_lower.contains("does not exist")
+            || line_lower.contains("user not found")
+            || line_lower.contains("no such user")
+            || line_lower.contains("nosuchuser")
+            || line_lower.contains("mailbox unavailable")
+            || line_lower.contains("recipient rejected")
+            || line_lower.contains("invalid recipient")
+        {
+            return Ok(false);
+        }
+
+        if (200..300).contains(&code) {
+            return Ok(true);
+        }
+
+        Ok(true)
+    };
+
+    match timeout(Duration::from_secs(4), fut).await {
+        Ok(res) => res,
+        Err(_) => Err("SMTP check timeout".to_string()),
+    }
+}
+
+pub async fn verify_mailbox_exists(email: &str) -> Result<(), String> {
+    let clean = email.trim().to_lowercase();
+    let parts: Vec<&str> = clean.split('@').collect();
+    if parts.len() != 2 {
+        return Err("Некорректный адрес электронной почты".to_string());
+    }
+    let domain = parts[1];
+
+    // 1. Mail.ru group domains
+    const MAILRU_DOMAINS: &[&str] = &["mail.ru", "inbox.ru", "list.ru", "bk.ru", "internet.ru", "xmail.ru"];
+    if MAILRU_DOMAINS.contains(&domain) {
+        match check_mailru_api(&clean).await {
+            Ok(exists) => {
+                if !exists {
+                    return Err(format!("Почтовый ящик '{}' не существует. Пожалуйста, укажите действительный почтовый ящик.", clean));
+                }
+                return Ok(());
+            }
+            Err(e) => {
+                eprintln!("[verify_mailbox] Mail.ru API error: {}", e);
+            }
+        }
+    }
+
+    // 2. Google / Gmail
+    if domain == "gmail.com" || domain == "googlemail.com" {
+        match check_smtp_mailbox_rcpt("gmail-smtp-in.l.google.com:25", &clean).await {
+            Ok(exists) => {
+                if !exists {
+                    return Err(format!("Почтовый ящик '{}' не существует. Пожалуйста, укажите действительный почтовый ящик.", clean));
+                }
+                return Ok(());
+            }
+            Err(e) => {
+                eprintln!("[verify_mailbox] Gmail check error: {}", e);
+            }
+        }
+    }
+
+    // 3. Yandex
+    const YANDEX_DOMAINS: &[&str] = &["yandex.ru", "ya.ru", "yandex.com", "yandex.by", "yandex.kz"];
+    if YANDEX_DOMAINS.contains(&domain) {
+        match check_smtp_mailbox_rcpt("mx.yandex.ru:25", &clean).await {
+            Ok(exists) => {
+                if !exists {
+                    return Err(format!("Почтовый ящик '{}' не существует. Пожалуйста, укажите действительный почтовый ящик.", clean));
+                }
+                return Ok(());
+            }
+            Err(e) => {
+                eprintln!("[verify_mailbox] Yandex check error: {}", e);
+            }
+        }
+    }
+
+    // 4. Other domains: lookup MX or primary host
+    if let Ok(mut addrs) = tokio::net::lookup_host(format!("{}:25", domain)).await
+        && let Some(addr) = addrs.next()
+            && let Ok(exists) = check_smtp_mailbox_rcpt(&addr.to_string(), &clean).await
+                && !exists {
+                    return Err(format!("Почтовый ящик '{}' не существует. Пожалуйста, укажите действительный почтовый ящик.", clean));
+                }
+
+    Ok(())
+}
+
+pub async fn check_email_already_registered(email: &str) -> Result<bool, String> {
+    let clean = email.trim().to_lowercase();
+    let config = get_db_config();
+    let client = connect_to_db(&config).await.map_err(|e| e.to_string())?;
+    let check_query = format!(
+        "SELECT 1 FROM {} WHERE LOWER({}) = LOWER($1) LIMIT 1",
+        config.users_table, config.email_column
+    );
+    let row = client.query_opt(&check_query, &[&clean]).await.map_err(|e| e.to_string())?;
+    Ok(row.is_some())
 }
 
 pub async fn register_user(email: &str, password: &str, username: Option<&str>) -> AuthResponse {
@@ -642,6 +831,14 @@ pub async fn register_user(email: &str, password: &str, username: Option<&str>) 
         };
     }
 
+    if let Err(err) = verify_mailbox_exists(clean_email).await {
+        return AuthResponse {
+            success: false,
+            message: err,
+            user: None,
+        };
+    }
+
     let config = get_db_config();
     let client = match connect_to_db(&config).await {
         Ok(c) => c,
@@ -653,6 +850,19 @@ pub async fn register_user(email: &str, password: &str, username: Option<&str>) 
             };
         }
     };
+
+    // Strictly enforce 1 account per email address
+    let check_existing = format!(
+        "SELECT 1 FROM {} WHERE LOWER({}) = LOWER($1) LIMIT 1",
+        config.users_table, config.email_column
+    );
+    if let Ok(Some(_)) = client.query_opt(&check_existing, &[&clean_email]).await {
+        return AuthResponse {
+            success: false,
+            message: "На этот адрес электронной почты уже зарегистрирован аккаунт. На одну почту можно создать только 1 аккаунт.".to_string(),
+            user: None,
+        };
+    }
 
     // Auto-create table if standard 'users' table
     if config.users_table == "users" && config.email_column == "email" && config.password_column == "password" {
@@ -724,7 +934,7 @@ pub async fn register_user(email: &str, password: &str, username: Option<&str>) 
             if err_str.contains("unique") || err_str.contains("duplicate") || err_str.contains("уже существует") {
                 AuthResponse {
                     success: false,
-                    message: "Пользователь с таким email уже существует".to_string(),
+                    message: "На этот адрес электронной почты уже зарегистрирован аккаунт. На одну почту можно создать только 1 аккаунт.".to_string(),
                     user: None,
                 }
             } else {
@@ -754,6 +964,7 @@ fn generate_reset_code() -> String {
     format!("{:06}", num)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn send_smtp_email(
     host: &str,
     port: u16,
@@ -1113,6 +1324,14 @@ pub async fn request_registration_code(email: &str, _username: Option<&str>) -> 
         };
     }
 
+    if let Err(e) = verify_mailbox_exists(clean_email).await {
+        return ResetRequestResponse {
+            success: false,
+            message: e,
+            dev_code: None,
+        };
+    }
+
     let config = get_db_config();
     let client = match connect_to_db(&config).await {
         Ok(c) => c,
@@ -1133,7 +1352,7 @@ pub async fn request_registration_code(email: &str, _username: Option<&str>) -> 
     match client.query_opt(&check_query, &[&clean_email]).await {
         Ok(Some(_)) => ResetRequestResponse {
             success: false,
-            message: "Пользователь с таким адресом электронной почты уже зарегистрирован".to_string(),
+            message: "На этот адрес электронной почты уже зарегистрирован аккаунт. На одну почту можно создать только 1 аккаунт.".to_string(),
             dev_code: None,
         },
         Ok(None) => {
@@ -1269,6 +1488,25 @@ mod tests {
         assert!(verify_domain_exists("gmail.com").await.is_ok());
         assert!(verify_domain_exists("mail.ru").await.is_ok());
         assert!(verify_domain_exists("this-domain-surely-does-not-exist-123456789.ru").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_verify_mailbox_exists() {
+        // Real mailboxes should pass
+        assert!(verify_mailbox_exists("scorporation@internet.ru").await.is_ok());
+
+        // Fake / non-existent mailboxes on Mail.ru HTTP API must fail!
+        assert!(verify_mailbox_exists("ne60201@mail.ru").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_check_email_already_registered() {
+        // Admin email exists in database
+        assert_eq!(check_email_already_registered("dimatyilickiy0511@gmail.com").await.unwrap(), true);
+        // Case-insensitive check
+        assert_eq!(check_email_already_registered("DIMATYILICKIY0511@GMAIL.COM").await.unwrap(), true);
+        // Unregistered email
+        assert_eq!(check_email_already_registered("brand_new_unregistered_email_998877@mail.ru").await.unwrap(), false);
     }
 
     #[tokio::test]

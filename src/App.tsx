@@ -18,12 +18,48 @@ import { OtpInput } from "./components/OtpInput";
 import { UpdaterBanner } from "./components/UpdaterBanner";
 import "./App.css";
 import Dashboard from "./pages/dashboard/Dashboard";
+import { TvProfileSelector } from "./components/TvProfileSelector";
 
 const isTauri = () => {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 };
 
+// Helper for Smart TV / Android TV detection
+const detectTvEnvironment = (): boolean => {
+  if (typeof window === "undefined") return false;
+  const saved = localStorage.getItem("has_tv_mode");
+  if (saved !== null) return saved === "true";
+  const ua = (navigator.userAgent || "").toLowerCase();
+  const isTvUa =
+    ua.includes("android tv") ||
+    ua.includes("smarttv") ||
+    ua.includes("googletv") ||
+    ua.includes("tizen") ||
+    ua.includes("webos") ||
+    ua.includes("appletv") ||
+    ua.includes("crkey") ||
+    ua.includes("bravia") ||
+    ua.includes("aftt") ||
+    ua.includes("aftm") ||
+    ua.includes("mibox") ||
+    ua.includes("mi box") ||
+    ua.includes("shield") ||
+    ua.includes("dtv") ||
+    ua.includes("smart-tv") ||
+    ua.includes("hbbtv") ||
+    ua.includes("netcast") ||
+    ua.includes("viera") ||
+    ua.includes("roku") ||
+    ua.includes("firetv");
+  if (isTvUa) return true;
+  const isAndroid = ua.includes("android");
+  const noTouch = !("ontouchstart" in window) && navigator.maxTouchPoints === 0;
+  if (isAndroid && noTouch) return true;
+  return false;
+};
+
 export default function App() {
+  const [isTvEnvironment, setIsTvEnvironment] = useState<boolean>(detectTvEnvironment);
   const [mode, setMode] = useState<"login" | "register" | "reset">("login");
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
@@ -36,6 +72,9 @@ export default function App() {
   const [regStage, setRegStage] = useState<1 | 2>(1);
   const [regCode, setRegCode] = useState("");
   const [regCooldown, setRegCooldown] = useState(0);
+  const [emailCheckLoading, setEmailCheckLoading] = useState(false);
+  const [emailCheckStatus, setEmailCheckStatus] = useState<"idle" | "checking" | "valid" | "invalid">("idle");
+  const [emailCheckMsg, setEmailCheckMsg] = useState<string | null>(null);
 
   // Password reset state
   const [resetStage, setResetStage] = useState<1 | 2 | 3>(1);
@@ -65,16 +104,34 @@ export default function App() {
 
   // Check saved session on mount
   useEffect(() => {
-    const savedUser = localStorage.getItem("has_remembered_user");
-    if (savedUser) {
-      try {
-        const parsed = JSON.parse(savedUser);
-        if (parsed?.email && parsed.email.toLowerCase() === "ne60201@gmail.com") {
-          parsed.role = "admin";
+    const isTv = isTvEnvironment;
+    // On TV, the user explicitly wants the profile selection screen at startup!
+    if (!isTv) {
+      const savedUser = localStorage.getItem("has_remembered_user");
+      if (savedUser) {
+        try {
+          const parsed = JSON.parse(savedUser);
+          if (parsed?.email && parsed.email.toLowerCase() === "ne60201@gmail.com") {
+            parsed.role = "admin";
+          }
+          setCurrentUser(parsed);
+        } catch {
+          localStorage.removeItem("has_remembered_user");
         }
-        setCurrentUser(parsed);
-      } catch {
-        localStorage.removeItem("has_remembered_user");
+      }
+    } else {
+      // On TV, ensure remembered user is saved into has_tv_saved_profiles
+      const savedUser = localStorage.getItem("has_remembered_user");
+      if (savedUser) {
+        try {
+          const parsed = JSON.parse(savedUser);
+          const savedProfilesStr = localStorage.getItem("has_tv_saved_profiles");
+          const existingProfiles = savedProfilesStr ? JSON.parse(savedProfilesStr) : [];
+          if (!existingProfiles.some((p: any) => p.email?.toLowerCase() === parsed.email?.toLowerCase())) {
+            existingProfiles.unshift(parsed);
+            localStorage.setItem("has_tv_saved_profiles", JSON.stringify(existingProfiles));
+          }
+        } catch {}
       }
     }
 
@@ -85,7 +142,22 @@ export default function App() {
 
     // Check DB status on startup
     checkDatabase();
-  }, []);
+  }, [isTvEnvironment]);
+
+  // Activate TV mode immediately upon any remote control key press
+  useEffect(() => {
+    const handleRemoteKey = (e: KeyboardEvent) => {
+      const isRemoteKey =
+        [19, 20, 21, 22, 23, 4, 82, 85, 179].includes(e.keyCode) ||
+        ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key);
+      if (isRemoteKey && !isTvEnvironment) {
+        setIsTvEnvironment(true);
+        localStorage.setItem("has_tv_mode", "true");
+      }
+    };
+    window.addEventListener("keydown", handleRemoteKey);
+    return () => window.removeEventListener("keydown", handleRemoteKey);
+  }, [isTvEnvironment]);
 
   // Countdown timer for OTP re-send in resetStage 2
   useEffect(() => {
@@ -155,6 +227,16 @@ export default function App() {
 
       if (res.success && res.user) {
         setCurrentUser(res.user);
+        try {
+          const savedProfilesStr = localStorage.getItem("has_tv_saved_profiles");
+          const existingProfiles = savedProfilesStr ? JSON.parse(savedProfilesStr) : [];
+          const updated = [
+            res.user,
+            ...existingProfiles.filter((p: any) => p.email?.toLowerCase() !== res.user!.email.toLowerCase()),
+          ];
+          localStorage.setItem("has_tv_saved_profiles", JSON.stringify(updated));
+        } catch {}
+
         if (rememberMe) {
           localStorage.setItem("has_remembered_user", JSON.stringify(res.user));
           localStorage.setItem("has_remembered_email", email.trim());
@@ -176,6 +258,34 @@ export default function App() {
     return /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(val.trim());
   };
 
+  const handleEmailBlur = async () => {
+    const clean = email.trim();
+    if (!clean || mode !== "register" || regStage !== 1) return;
+    if (!isValidEmailFormat(clean)) {
+      setEmailCheckStatus("invalid");
+      setEmailCheckMsg("Некорректный формат адреса электронной почты");
+      return;
+    }
+    if (!isTauri()) return;
+
+    setEmailCheckLoading(true);
+    setEmailCheckStatus("checking");
+    setEmailCheckMsg(null);
+    try {
+      await invoke("validate_email", { email: clean });
+      setEmailCheckStatus("valid");
+      setEmailCheckMsg("Почта подтверждена (существует)");
+      setError(null);
+    } catch (err: any) {
+      setEmailCheckStatus("invalid");
+      const msg = err?.message || String(err);
+      setEmailCheckMsg(msg);
+      setError(msg);
+    } finally {
+      setEmailCheckLoading(false);
+    }
+  };
+
   const handleRequestRegCode = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     setError(null);
@@ -189,6 +299,11 @@ export default function App() {
 
     if (!isValidEmailFormat(cleanEmail)) {
       setError("Пожалуйста, введите корректный адрес электронной почты (например, name@mail.ru)");
+      return;
+    }
+
+    if (emailCheckStatus === "invalid") {
+      setError(emailCheckMsg || "Указанный адрес электронной почты не существует. Пожалуйста, укажите действительный почтовый ящик.");
       return;
     }
 
@@ -404,7 +519,7 @@ export default function App() {
   if (currentUser) {
     return (
       <>
-        <UpdaterBanner />
+        <UpdaterBanner isTvEnvironment={isTvEnvironment} />
         <Dashboard
           user={currentUser}
           dbInfo={dbInfo}
@@ -415,10 +530,28 @@ export default function App() {
     );
   }
 
+  if (isTvEnvironment) {
+    return (
+      <>
+        <UpdaterBanner isTvEnvironment={isTvEnvironment} />
+        <TvProfileSelector
+          onSelectProfile={(user) => {
+            setCurrentUser(user);
+            localStorage.setItem("has_remembered_user", JSON.stringify(user));
+          }}
+          onSwitchToDesktop={() => {
+            setIsTvEnvironment(false);
+            localStorage.setItem("has_tv_mode", "false");
+          }}
+        />
+      </>
+    );
+  }
+
   return (
     <div className="app-viewport">
       {/* Auto-updater banner */}
-      <UpdaterBanner />
+      <UpdaterBanner isTvEnvironment={isTvEnvironment} />
 
       {/* Main Content Area */}
       {mode === "reset" ? (
@@ -670,9 +803,34 @@ export default function App() {
         <main className="auth-main-container">
           <div className="auth-card">
             {/* Actual Project Logo and Name */}
-            <div className="brand-header">
+            <div className="brand-header" style={{ position: "relative" }}>
               <img src={logoUrl} alt="Home Autli Server" className="brand-logo-img" />
               <span className="brand-title">Home Autli Server</span>
+              <button
+                type="button"
+                className="tv-mode-badge-btn"
+                onClick={() => {
+                  setIsTvEnvironment(true);
+                  localStorage.setItem("has_tv_mode", "true");
+                }}
+                title="Перейти в режим Android TV (выбор профилей)"
+                style={{
+                  position: "absolute",
+                  right: 0,
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  background: "rgba(99, 102, 241, 0.15)",
+                  border: "1px solid rgba(99, 102, 241, 0.4)",
+                  color: "#a5b4fc",
+                  fontSize: "12px",
+                  fontWeight: 600,
+                  padding: "4px 10px",
+                  borderRadius: "9999px",
+                  cursor: "pointer",
+                }}
+              >
+                📺 ТВ Режим
+              </button>
             </div>
 
             {/* Title & Subtitle */}
@@ -795,9 +953,21 @@ export default function App() {
 
                 {/* Email Address */}
                 <div className="form-group">
-                  <label className="form-label" htmlFor="email-input">
-                    Электронная почта
-                  </label>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <label className="form-label" htmlFor="email-input">
+                      Электронная почта
+                    </label>
+                    {mode === "register" && emailCheckStatus === "valid" && (
+                      <span style={{ fontSize: 11, color: "var(--color-success, #10b981)", fontWeight: 500 }}>
+                        ✓ Почта существует
+                      </span>
+                    )}
+                    {mode === "register" && emailCheckStatus === "invalid" && (
+                      <span style={{ fontSize: 11, color: "var(--color-danger, #ef4444)", fontWeight: 500 }}>
+                        {emailCheckMsg?.includes("зарегистрирован") ? "✕ Уже зарегистрирован" : "✕ Недействительна"}
+                      </span>
+                    )}
+                  </div>
                   <div className="input-container">
                     <div className="input-icon-left">
                       <MailIcon />
@@ -808,11 +978,28 @@ export default function App() {
                       className="form-input"
                       placeholder="user@example.com"
                       value={email}
-                      onChange={(e) => setEmail(e.target.value)}
+                      onChange={(e) => {
+                        setEmail(e.target.value);
+                        if (emailCheckStatus !== "idle") {
+                          setEmailCheckStatus("idle");
+                          setEmailCheckMsg(null);
+                        }
+                      }}
+                      onBlur={handleEmailBlur}
                       required
                       autoComplete="email"
                     />
+                    {mode === "register" && emailCheckLoading && (
+                      <div className="input-icon-right" style={{ pointerEvents: "none" }}>
+                        <SpinnerIcon className="w-4 h-4" />
+                      </div>
+                    )}
                   </div>
+                  {mode === "register" && emailCheckMsg && emailCheckStatus === "invalid" && (
+                    <div style={{ fontSize: 11, color: "#f87171", marginTop: 4 }}>
+                      {emailCheckMsg}
+                    </div>
+                  )}
                 </div>
 
                 {/* Password */}
@@ -929,6 +1116,8 @@ export default function App() {
                             setRegStage(1);
                             setRegCode("");
                             setUsername("");
+                            setEmailCheckStatus("idle");
+                            setEmailCheckMsg(null);
                             setError(null);
                             setSuccess(null);
                           }}
@@ -946,6 +1135,8 @@ export default function App() {
                             setRegStage(1);
                             setRegCode("");
                             setUsername("");
+                            setEmailCheckStatus("idle");
+                            setEmailCheckMsg(null);
                             setError(null);
                             setSuccess(null);
                           }}

@@ -94,7 +94,7 @@ async fn fetch_profile_with_client(
         .map_err(|e| format!("Ошибка загрузки профиля: {}", e))?
         .ok_or_else(|| "Пользователь не найден в базе данных".to_string())?;
 
-    Ok(UserProfileDto {
+    let mut profile_res = UserProfileDto {
         id: row.get(0),
         email: row.get(1),
         username: row.get(2),
@@ -105,7 +105,33 @@ async fn fetch_profile_with_client(
         notify_sound: row.get(7),
         notify_security: row.get(8),
         created_at: row.get(9),
-    })
+    };
+
+    // Safely supplement from server_notes __profile_prefs__ if available
+    let note_sql = "SELECT content FROM server_notes WHERE LOWER(user_email) = LOWER($1) AND title = '__profile_prefs__' ORDER BY id DESC LIMIT 1;";
+    if let Ok(rows) = client.query(note_sql, &[&clean_email]).await
+        && let Some(note_row) = rows.first()
+            && let Some(json_str) = note_row.get::<_, Option<String>>(0)
+                && let Ok(prefs) = serde_json::from_str::<serde_json::Value>(&json_str) {
+                    if let Some(bio) = prefs.get("bio").and_then(|v| v.as_str()) {
+                        profile_res.bio = Some(bio.to_string());
+                    }
+                    if let Some(avatar) = prefs.get("avatar").and_then(|v| v.as_str())
+                        && !avatar.trim().is_empty() {
+                            profile_res.avatar = Some(avatar.to_string());
+                        }
+                    if let Some(notify_email) = prefs.get("notify_email").and_then(|v| v.as_bool()) {
+                        profile_res.notify_email = notify_email;
+                    }
+                    if let Some(notify_sound) = prefs.get("notify_sound").and_then(|v| v.as_bool()) {
+                        profile_res.notify_sound = notify_sound;
+                    }
+                    if let Some(notify_security) = prefs.get("notify_security").and_then(|v| v.as_bool()) {
+                        profile_res.notify_security = notify_security;
+                    }
+                }
+
+    Ok(profile_res)
 }
 
 #[tauri::command]
@@ -132,29 +158,77 @@ pub async fn save_user_profile(
     let clean_bio = profile.bio.as_deref().map(|s| s.trim());
     let avatar = profile.avatar.filter(|s| !s.trim().is_empty());
 
-    // Single unified UPDATE if columns exist
-    if cols.contains("username") || cols.contains("avatar") || cols.contains("bio") {
-        let update_sql = "UPDATE users SET \
-            username = CASE WHEN $1::text IS NOT NULL THEN $1 ELSE username END, \
-            avatar = CASE WHEN $2::text IS NOT NULL THEN $2 ELSE avatar END, \
-            bio = $3, \
-            notify_email = $4, \
-            notify_sound = $5, \
-            notify_security = $6 \
-            WHERE LOWER(email) = LOWER($7);";
-        
+    // 1. Dynamic safe UPDATE on users table (only updating columns that actually exist)
+    let mut set_clauses = Vec::new();
+    let mut params: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = Vec::new();
+
+    if cols.contains("username") && clean_username.is_some() {
+        params.push(&clean_username);
+        set_clauses.push(format!("username = ${}", params.len()));
+    }
+    if cols.contains("avatar") && avatar.is_some() {
+        params.push(&avatar);
+        set_clauses.push(format!("avatar = ${}", params.len()));
+    }
+    if cols.contains("bio") {
+        params.push(&clean_bio);
+        set_clauses.push(format!("bio = ${}", params.len()));
+    }
+    if cols.contains("notify_email") {
+        params.push(&profile.notify_email);
+        set_clauses.push(format!("notify_email = ${}", params.len()));
+    }
+    if cols.contains("notify_sound") {
+        params.push(&profile.notify_sound);
+        set_clauses.push(format!("notify_sound = ${}", params.len()));
+    }
+    if cols.contains("notify_security") {
+        params.push(&profile.notify_security);
+        set_clauses.push(format!("notify_security = ${}", params.len()));
+    }
+
+    if !set_clauses.is_empty() {
+        params.push(&clean_email);
+        let update_sql = format!(
+            "UPDATE users SET {} WHERE LOWER(email) = LOWER(${})",
+            set_clauses.join(", "),
+            params.len()
+        );
+        let _ = client.execute(&update_sql, &params[..]).await;
+    }
+
+    // 2. Persist extended profile preferences in server_notes as bulletproof backup
+    let prefs_json = serde_json::json!({
+        "username": clean_username,
+        "avatar": avatar,
+        "bio": clean_bio,
+        "notify_email": profile.notify_email,
+        "notify_sound": profile.notify_sound,
+        "notify_security": profile.notify_security,
+    }).to_string();
+
+    let existing_note = client
+        .query_opt(
+            "SELECT id FROM server_notes WHERE LOWER(user_email) = LOWER($1) AND title = '__profile_prefs__' LIMIT 1;",
+            &[&clean_email],
+        )
+        .await
+        .ok()
+        .flatten();
+
+    if let Some(row) = existing_note {
+        let note_id: i64 = row.get(0);
         let _ = client
             .execute(
-                update_sql,
-                &[
-                    &clean_username,
-                    &avatar,
-                    &clean_bio,
-                    &profile.notify_email,
-                    &profile.notify_sound,
-                    &profile.notify_security,
-                    &clean_email,
-                ],
+                "UPDATE server_notes SET content = $1 WHERE id = $2;",
+                &[&prefs_json, &note_id],
+            )
+            .await;
+    } else {
+        let _ = client
+            .execute(
+                "INSERT INTO server_notes (user_email, title, folder, content, note_type, status) VALUES ($1, '__profile_prefs__', 'system', $2, 'system', 'active');",
+                &[&clean_email, &prefs_json],
             )
             .await;
     }

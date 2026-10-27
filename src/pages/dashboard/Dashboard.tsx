@@ -1,10 +1,9 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, lazy, Suspense } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { UserDto, DbStatus, SafeDbInfo, ServerUserDto, UserProfileDto } from "../../types";
 import logoUrl from "../../assets/logo.png";
 import {
   HomeNavIcon,
-  StorageNavIcon,
   UsersNavIcon,
   SettingsNavIcon,
   HelpNavIcon,
@@ -15,13 +14,41 @@ import {
   CloseIcon,
 } from "../../components/Icons";
 import Home from "../home/Home";
-import Storage from "../storage/Storage";
 import Users from "../users/Users";
 import Settings from "../settings/Settings";
 import Help from "../help/Help";
 import Profile from "../profile/Profile";
-import Cinema from "../cinema/Cinema";
 import "./Dashboard.css";
+
+const Cinema = lazy(() => import("../cinema/Cinema"));
+
+function CinemaLoadingFallback() {
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        minHeight: "70vh",
+        color: "#94a3b8",
+        gap: 16,
+      }}
+    >
+      <div
+        style={{
+          width: 48,
+          height: 48,
+          border: "3px solid rgba(129, 140, 248, 0.2)",
+          borderTopColor: "#818cf8",
+          borderRadius: "50%",
+          animation: "has-spin 0.8s linear infinite",
+        }}
+      />
+      <span style={{ fontSize: 16, fontWeight: 500 }}>Загрузка Кинотеатра...</span>
+    </div>
+  );
+}
 
 interface DashboardProps {
   user: UserDto;
@@ -30,7 +57,7 @@ interface DashboardProps {
   onLogout: () => void;
 }
 
-type NavTab = "home" | "storage" | "cinema" | "users" | "settings" | "profile" | "help";
+type NavTab = "cinema" | "home" | "users" | "settings" | "profile" | "help";
 
 // Helper for Smart TV / Android TV detection
 const detectTvEnvironment = (): boolean => {
@@ -78,9 +105,7 @@ export default function Dashboard({
   }, [user]);
 
   const [isTvEnvironment, setIsTvEnvironment] = useState<boolean>(detectTvEnvironment);
-  const [activeTab, setActiveTab] = useState<NavTab>(() => {
-    return detectTvEnvironment() ? "cinema" : "home";
-  });
+  const [activeTab, setActiveTab] = useState<NavTab>("cinema");
   const [serverUsers, setServerUsers] = useState<ServerUserDto[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState<boolean>(() => {
@@ -168,14 +193,14 @@ export default function Dashboard({
         (u.role?.toLowerCase() === "admin" || u.role?.toLowerCase() === "администратор" || u.id === 1)
     );
 
-  // Non-admin redirection: users and separate cinema tabs are reserved for admin
+  // Non-admin redirection: users and home (server stats) tabs are reserved for admin
   useEffect(() => {
-    if (!isUserAdmin && (activeTab === "users" || activeTab === "cinema")) {
-      setActiveTab("home");
+    if (!isUserAdmin && (activeTab === "users" || activeTab === "home")) {
+      setActiveTab("cinema");
     }
   }, [isUserAdmin, activeTab]);
 
-  const isCinemaView = activeTab === "cinema" || (!isUserAdmin && activeTab === "home");
+  const isCinemaView = activeTab === "cinema";
 
   const loadServerUsers = useCallback(async () => {
     if (!isTauri) return;
@@ -283,42 +308,26 @@ export default function Dashboard({
         <nav className="has-nav-menu">
           <button
             type="button"
-            className={`has-nav-item ${activeTab === "home" ? "active" : ""}`}
-            onClick={() => handleNavClick("home")}
-            title={isCollapsed ? (isUserAdmin ? "Панель сервера" : "Кинотеатр") : undefined}
+            className={`has-nav-item ${activeTab === "cinema" ? "active" : ""}`}
+            onClick={() => handleNavClick("cinema")}
+            title={isCollapsed ? "Кинотеатр" : undefined}
           >
             <div className="has-nav-item-left">
-              {isUserAdmin ? (
-                <HomeNavIcon className="w-5 h-5" width={20} height={20} />
-              ) : (
-                <CinemaNavIcon className="w-5 h-5" width={20} height={20} />
-              )}
-              {!isCollapsed && <span>{isUserAdmin ? "Панель сервера" : "Кинотеатр"}</span>}
-            </div>
-          </button>
-
-          <button
-            type="button"
-            className={`has-nav-item ${activeTab === "storage" ? "active" : ""}`}
-            onClick={() => handleNavClick("storage")}
-            title={isCollapsed ? "Хранилище" : undefined}
-          >
-            <div className="has-nav-item-left">
-              <StorageNavIcon className="w-5 h-5" width={20} height={20} />
-              {!isCollapsed && <span>Хранилище</span>}
+              <CinemaNavIcon className="w-5 h-5" width={20} height={20} />
+              {!isCollapsed && <span>Кинотеатр</span>}
             </div>
           </button>
 
           {isUserAdmin && (
             <button
               type="button"
-              className={`has-nav-item ${activeTab === "cinema" ? "active" : ""}`}
-              onClick={() => handleNavClick("cinema")}
-              title={isCollapsed ? "Кинотеатр" : undefined}
+              className={`has-nav-item ${activeTab === "home" ? "active" : ""}`}
+              onClick={() => handleNavClick("home")}
+              title={isCollapsed ? "Панель сервера" : undefined}
             >
               <div className="has-nav-item-left">
-                <CinemaNavIcon className="w-5 h-5" width={20} height={20} />
-                {!isCollapsed && <span>Кинотеатр</span>}
+                <HomeNavIcon className="w-5 h-5" width={20} height={20} />
+                {!isCollapsed && <span>Панель сервера</span>}
               </div>
             </button>
           )}
@@ -427,7 +436,6 @@ export default function Dashboard({
             <div>
               <h1 className="has-header-title">
                 {activeTab === "home" && "Обзор сервера"}
-                {activeTab === "storage" && "Файловое хранилище"}
                 {activeTab === "users" && "Пользователи системы"}
                 {activeTab === "settings" && "Настройки системы"}
                 {activeTab === "help" && "Помощь и поддержка"}
@@ -467,33 +475,24 @@ export default function Dashboard({
 
         {/* Content Body Rendering Separate Page Components */}
         <div className="has-content-body">
-          {activeTab === "home" && (
-            isUserAdmin ? (
-              <Home
-                user={currentUser}
-                displayName={displayName}
-                dbInfo={dbInfo}
-                dbStatus={dbStatus}
-                usersCount={serverUsers.length}
-              />
-            ) : (
+          {activeTab === "cinema" && (
+            <Suspense fallback={<CinemaLoadingFallback />}>
               <Cinema
                 currentUser={currentUser}
                 onNavigateTab={(tab) => handleNavClick(tab as NavTab)}
                 onLogout={onLogout}
                 isTvEnvironment={isTvEnvironment}
               />
-            )
+            </Suspense>
           )}
 
-          {activeTab === "storage" && <Storage currentUser={currentUser} />}
-
-          {activeTab === "cinema" && isUserAdmin && (
-            <Cinema
-              currentUser={currentUser}
-              onNavigateTab={(tab) => handleNavClick(tab as NavTab)}
-              onLogout={onLogout}
-              isTvEnvironment={isTvEnvironment}
+          {activeTab === "home" && isUserAdmin && (
+            <Home
+              user={currentUser}
+              displayName={displayName}
+              dbInfo={dbInfo}
+              dbStatus={dbStatus}
+              usersCount={serverUsers.length}
             />
           )}
 

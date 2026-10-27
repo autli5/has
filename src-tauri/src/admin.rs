@@ -37,24 +37,21 @@ pub fn verify_admin_pin(input_pin: Option<&str>) -> Result<(), String> {
 }
 
 pub fn get_current_device_name() -> String {
-    if let Ok(name) = std::env::var("COMPUTERNAME") {
-        if !name.trim().is_empty() {
+    if let Ok(name) = std::env::var("COMPUTERNAME")
+        && !name.trim().is_empty() {
             return name.trim().to_string();
         }
-    }
-    if let Ok(name) = std::env::var("HOSTNAME") {
-        if !name.trim().is_empty() {
+    if let Ok(name) = std::env::var("HOSTNAME")
+        && !name.trim().is_empty() {
             return name.trim().to_string();
         }
-    }
-    if let Ok(output) = std::process::Command::new("hostname").output() {
-        if output.status.success() {
+    if let Ok(output) = std::process::Command::new("hostname").output()
+        && output.status.success() {
             let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
             if !s.is_empty() {
                 return s;
             }
         }
-    }
     if let Ok(user) = std::env::var("USER") {
         return format!("{}-workstation", user.trim());
     }
@@ -62,13 +59,11 @@ pub fn get_current_device_name() -> String {
 }
 
 pub fn get_current_local_ip() -> String {
-    if let Ok(socket) = std::net::UdpSocket::bind("0.0.0.0:0") {
-        if socket.connect("8.8.8.8:80").is_ok() {
-            if let Ok(addr) = socket.local_addr() {
+    if let Ok(socket) = std::net::UdpSocket::bind("0.0.0.0:0")
+        && socket.connect("8.8.8.8:80").is_ok()
+            && let Ok(addr) = socket.local_addr() {
                 return addr.ip().to_string();
             }
-        }
-    }
     "127.0.0.1".to_string()
 }
 
@@ -140,7 +135,7 @@ pub async fn get_admin_security_info(admin_email: &str) -> Result<DeviceSecurity
         true
     } else {
         match &trusted_device_name {
-            Some(t) => t.trim().eq_ignore_ascii_case(&current_device.trim()),
+            Some(t) => t.trim().eq_ignore_ascii_case(current_device.trim()),
             None => true,
         }
     };
@@ -149,7 +144,7 @@ pub async fn get_admin_security_info(admin_email: &str) -> Result<DeviceSecurity
         true
     } else {
         match &trusted_ip {
-            Some(t) => t.trim().eq_ignore_ascii_case(&current_ip.trim()),
+            Some(t) => t.trim().eq_ignore_ascii_case(current_ip.trim()),
             None => true,
         }
     };
