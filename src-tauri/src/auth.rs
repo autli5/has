@@ -527,6 +527,91 @@ pub async fn authenticate_user(email: &str, password: &str) -> AuthResponse {
     }
 }
 
+pub fn validate_email_syntax(email: &str) -> Result<(&str, &str), String> {
+    let clean = email.trim();
+    if clean.is_empty() {
+        return Err("Адрес электронной почты не может быть пустым".to_string());
+    }
+    if clean.len() > 254 {
+        return Err("Слишком длинный адрес электронной почты".to_string());
+    }
+    let parts: Vec<&str> = clean.split('@').collect();
+    if parts.len() != 2 {
+        return Err("Некорректный формат email: адрес должен содержать ровно один символ '@'".to_string());
+    }
+    let local = parts[0];
+    let domain = parts[1];
+
+    if local.is_empty() || local.len() > 64 {
+        return Err("Некорректная первая часть email адреса".to_string());
+    }
+    if domain.is_empty() || domain.len() > 253 {
+        return Err("Некорректный домен email адреса".to_string());
+    }
+
+    if local.starts_with('.') || local.ends_with('.') || local.contains("..") {
+        return Err("Email не должен начинаться/заканчиваться точкой или содержать две точки подряд".to_string());
+    }
+    if !local.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-' || c == '+' || c == '%') {
+        return Err("Email содержит недопустимые символы в имени пользователя".to_string());
+    }
+
+    if domain.starts_with('.') || domain.ends_with('.') || domain.contains("..") || !domain.contains('.') {
+        return Err("Некорректный домен почты (пример: name@mail.ru)".to_string());
+    }
+
+    let domain_parts: Vec<&str> = domain.split('.').collect();
+    let tld = match domain_parts.last() {
+        Some(t) => *t,
+        None => return Err("Отсутствует доменная зона почты".to_string()),
+    };
+    if tld.len() < 2 || !tld.chars().all(|c| c.is_ascii_alphabetic()) {
+        return Err("Некорректная доменная зона почты (например: .ru, .com)".to_string());
+    }
+
+    for part in &domain_parts {
+        if part.is_empty() || part.starts_with('-') || part.ends_with('-') {
+            return Err("Некорректное имя почтового сервера".to_string());
+        }
+        if !part.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+            return Err("Домен почты содержит недопустимые символы".to_string());
+        }
+    }
+
+    const DISPOSABLE_DOMAINS: &[&str] = &[
+        "tempmail.com", "10minutemail.com", "guerrillamail.com", "mailinator.com",
+        "trashmail.com", "yopmail.com", "temp-mail.org", "dispostable.com",
+        "getnada.com", "throwawaymail.com", "fakeinbox.com", "sharklasers.com",
+        "guerrillamailblock.com", "grr.la", "mohmal.com", "dropmail.me",
+        "tempail.com", "burnermail.io", "crazymailing.com", "generator.email"
+    ];
+    let domain_lower = domain.to_lowercase();
+    if DISPOSABLE_DOMAINS.iter().any(|&d| domain_lower == d || domain_lower.ends_with(&format!(".{}", d))) {
+        return Err("Временные и одноразовые почтовые ящики не поддерживаются. Пожалуйста, используйте надежный адрес.".to_string());
+    }
+
+    Ok((local, domain))
+}
+
+pub async fn verify_domain_exists(domain: &str) -> Result<(), String> {
+    let domain = domain.trim();
+    let resolves = match tokio::net::lookup_host(format!("{}:25", domain)).await {
+        Ok(mut addrs) => addrs.next().is_some(),
+        Err(_) => match tokio::net::lookup_host(format!("{}:443", domain)).await {
+            Ok(mut addrs) => addrs.next().is_some(),
+            Err(_) => match tokio::net::lookup_host(format!("{}:80", domain)).await {
+                Ok(mut addrs) => addrs.next().is_some(),
+                Err(_) => false,
+            },
+        },
+    };
+
+    if !resolves {
+        return Err(format!("Почтовый домен '{}' не найден в сети Интернет. Проверьте правильность адреса.", domain));
+    }
+    Ok(())
+}
+
 pub async fn register_user(email: &str, password: &str, username: Option<&str>) -> AuthResponse {
     let clean_email = email.trim();
     let clean_username = username.map(|u| u.trim()).filter(|u| !u.is_empty());
@@ -534,6 +619,25 @@ pub async fn register_user(email: &str, password: &str, username: Option<&str>) 
         return AuthResponse {
             success: false,
             message: "Email и пароль обязательны".to_string(),
+            user: None,
+        };
+    }
+
+    let (_, domain) = match validate_email_syntax(clean_email) {
+        Ok(d) => d,
+        Err(err) => {
+            return AuthResponse {
+                success: false,
+                message: err,
+                user: None,
+            };
+        }
+    };
+
+    if let Err(err) = verify_domain_exists(domain).await {
+        return AuthResponse {
+            success: false,
+            message: err,
             user: None,
         };
     }
@@ -976,9 +1080,196 @@ pub async fn reset_password_with_code(email: &str, code: &str, new_password: &st
     }
 }
 
+#[derive(Debug, Clone)]
+struct RegistrationEntry {
+    code: String,
+    expires_at: std::time::Instant,
+}
+
+static REGISTRATION_CODES: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, RegistrationEntry>>> = std::sync::OnceLock::new();
+
+fn get_registration_codes() -> &'static std::sync::Mutex<std::collections::HashMap<String, RegistrationEntry>> {
+    REGISTRATION_CODES.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+pub async fn request_registration_code(email: &str, _username: Option<&str>) -> ResetRequestResponse {
+    let clean_email = email.trim();
+    let (_, domain) = match validate_email_syntax(clean_email) {
+        Ok(res) => res,
+        Err(e) => {
+            return ResetRequestResponse {
+                success: false,
+                message: e,
+                dev_code: None,
+            };
+        }
+    };
+
+    if let Err(e) = verify_domain_exists(domain).await {
+        return ResetRequestResponse {
+            success: false,
+            message: e,
+            dev_code: None,
+        };
+    }
+
+    let config = get_db_config();
+    let client = match connect_to_db(&config).await {
+        Ok(c) => c,
+        Err(_) => {
+            return ResetRequestResponse {
+                success: false,
+                message: "Ошибка подключения к серверу. Попробуйте позже.".to_string(),
+                dev_code: None,
+            };
+        }
+    };
+
+    let check_query = format!(
+        "SELECT 1 FROM {} WHERE LOWER({}) = LOWER($1) LIMIT 1",
+        config.users_table, config.email_column
+    );
+
+    match client.query_opt(&check_query, &[&clean_email]).await {
+        Ok(Some(_)) => ResetRequestResponse {
+            success: false,
+            message: "Пользователь с таким адресом электронной почты уже зарегистрирован".to_string(),
+            dev_code: None,
+        },
+        Ok(None) => {
+            let code = generate_reset_code();
+            let expires_at = std::time::Instant::now() + std::time::Duration::from_secs(900); // 15 mins
+
+            {
+                let mut map = get_registration_codes().lock().unwrap();
+                map.insert(clean_email.to_lowercase(), RegistrationEntry {
+                    code: code.clone(),
+                    expires_at,
+                });
+            }
+
+            let smtp_host = extract_clean_env("SMTP_HOST", "smtp.mail.ru");
+            let smtp_port = extract_clean_env("SMTP_PORT", "465").parse::<u16>().unwrap_or(465);
+            let smtp_user = extract_clean_env("SMTP_USER", "scorporation@internet.ru");
+            let smtp_pass = extract_clean_env("SMTP_PASSWORD", "87AhqOfdlC5LPb5eIX3N");
+            let smtp_from = extract_clean_env("SMTP_FROM", &smtp_user);
+
+            let dev_code;
+            if !smtp_host.is_empty() {
+                let subject = "Home Autli Server: Код подтверждения регистрации";
+                let body = format!(
+                    "Здравствуйте!\n\nВаш проверочный код для подтверждения почты и завершения регистрации в Home Autli Server: {}\n\nКод действителен в течение 15 минут.\nЕсли вы не регистрировались в Home Autli Server, просто проигнорируйте это письмо.",
+                    code
+                );
+                match send_smtp_email(&smtp_host, smtp_port, &smtp_user, &smtp_pass, &smtp_from, clean_email, subject, &body).await {
+                    Ok(_) => {
+                        return ResetRequestResponse {
+                            success: true,
+                            message: format!("Код подтверждения успешно отправлен на почту {}", clean_email),
+                            dev_code: None,
+                        };
+                    }
+                    Err(e) => {
+                        eprintln!("Не удалось отправить email через SMTP: {}. Тестовый код: {}", e, code);
+                        dev_code = Some(code.clone());
+                    }
+                }
+            } else {
+                dev_code = Some(code.clone());
+            }
+
+            ResetRequestResponse {
+                success: true,
+                message: if dev_code.is_some() {
+                    format!("Проверочный код сгенерирован (тестовый режим: {})", code)
+                } else {
+                    format!("Код подтверждения отправлен на {}", clean_email)
+                },
+                dev_code,
+            }
+        }
+        Err(e) => ResetRequestResponse {
+            success: false,
+            message: format!("Ошибка проверки почты: {}", e),
+            dev_code: None,
+        },
+    }
+}
+
+pub async fn register_with_code(
+    email: &str,
+    code: &str,
+    password: &str,
+    username: Option<&str>,
+) -> AuthResponse {
+    let clean_email = email.trim();
+    let clean_code = code.trim();
+
+    if clean_code.is_empty() {
+        return AuthResponse {
+            success: false,
+            message: "Пожалуйста, введите проверочный код из письма".to_string(),
+            user: None,
+        };
+    }
+
+    {
+        let mut map = get_registration_codes().lock().unwrap();
+        let key = clean_email.to_lowercase();
+        if let Some(entry) = map.get(&key) {
+            if std::time::Instant::now() > entry.expires_at {
+                return AuthResponse {
+                    success: false,
+                    message: "Срок действия кода подтверждения истек. Запросите код заново.".to_string(),
+                    user: None,
+                };
+            }
+            if entry.code != clean_code {
+                return AuthResponse {
+                    success: false,
+                    message: "Неверный проверочный код. Проверьте введенные цифры.".to_string(),
+                    user: None,
+                };
+            }
+            map.remove(&key);
+        } else {
+            return AuthResponse {
+                success: false,
+                message: "Код подтверждения для данного адреса не найден или устарел. Запросите код снова.".to_string(),
+                user: None,
+            };
+        }
+    }
+
+    register_user(clean_email, password, username).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_validate_email_syntax() {
+        assert!(validate_email_syntax("user@gmail.com").is_ok());
+        assert!(validate_email_syntax("test.user+tag@mail.ru").is_ok());
+        assert!(validate_email_syntax("alex_99@yandex.ru").is_ok());
+
+        assert!(validate_email_syntax("").is_err());
+        assert!(validate_email_syntax("invalid").is_err());
+        assert!(validate_email_syntax("invalid@").is_err());
+        assert!(validate_email_syntax("@domain.com").is_err());
+        assert!(validate_email_syntax("user@.com").is_err());
+        assert!(validate_email_syntax("user@domain..com").is_err());
+        assert!(validate_email_syntax("user@tempmail.com").is_err());
+        assert!(validate_email_syntax("user@mailinator.com").is_err());
+    }
+
+    #[tokio::test]
+    async fn test_verify_domain_exists() {
+        assert!(verify_domain_exists("gmail.com").await.is_ok());
+        assert!(verify_domain_exists("mail.ru").await.is_ok());
+        assert!(verify_domain_exists("this-domain-surely-does-not-exist-123456789.ru").await.is_err());
+    }
 
     #[tokio::test]
     async fn test_database_connection() {

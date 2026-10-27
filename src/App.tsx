@@ -32,6 +32,11 @@ export default function App() {
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
 
+  // Registration verification code state
+  const [regStage, setRegStage] = useState<1 | 2>(1);
+  const [regCode, setRegCode] = useState("");
+  const [regCooldown, setRegCooldown] = useState(0);
+
   // Password reset state
   const [resetStage, setResetStage] = useState<1 | 2 | 3>(1);
   const [resetEmail, setResetEmail] = useState("");
@@ -50,6 +55,13 @@ export default function App() {
   const [dbInfo, setDbInfo] = useState<SafeDbInfo | null>(null);
 
   const [showForgotModal, setShowForgotModal] = useState(false);
+
+  useEffect(() => {
+    if (regCooldown > 0) {
+      const timer = setTimeout(() => setRegCooldown(regCooldown - 1), 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [regCooldown]);
 
   // Check saved session on mount
   useEffect(() => {
@@ -160,13 +172,23 @@ export default function App() {
     }
   };
 
-  const handleRegister = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const isValidEmailFormat = (val: string) => {
+    return /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(val.trim());
+  };
+
+  const handleRequestRegCode = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     setError(null);
     setSuccess(null);
 
-    if (!email.trim() || !password) {
+    const cleanEmail = email.trim();
+    if (!cleanEmail || !password) {
       setError("Пожалуйста, укажите email и пароль");
+      return;
+    }
+
+    if (!isValidEmailFormat(cleanEmail)) {
+      setError("Пожалуйста, введите корректный адрес электронной почты (например, name@mail.ru)");
       return;
     }
 
@@ -180,24 +202,71 @@ export default function App() {
       return;
     }
 
+    if (password.length < 6) {
+      setError("Пароль должен содержать минимум 6 символов");
+      return;
+    }
+
     if (!isTauri()) {
-      setError("Для регистрации пользователя в PostgreSQL запустите через Tauri ('npm run tauri dev')");
+      setError("Для регистрации пользователя запустите приложение в десктопном режиме");
       return;
     }
 
     setLoading(true);
     try {
-      const res = await invoke<AuthResponse>("register", {
+      const res = await invoke<ResetRequestResponse>("request_registration_code", {
+        email: cleanEmail,
+        username: username.trim(),
+      });
+
+      if (res.success) {
+        setRegStage(2);
+        setRegCooldown(60);
+        setSuccess(res.message);
+        if (res.dev_code) {
+          setRegCode(res.dev_code);
+        }
+      } else {
+        setError(res.message || "Ошибка отправки кода подтверждения на указанную почту.");
+      }
+    } catch (err: any) {
+      setError(`Ошибка: ${err?.message || err}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCompleteRegistration = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setSuccess(null);
+
+    if (!regCode.trim()) {
+      setError("Пожалуйста, введите проверочный код из письма");
+      return;
+    }
+
+    if (!isTauri()) {
+      setError("Для регистрации пользователя запустите десктопное приложение");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const res = await invoke<AuthResponse>("register_with_code", {
         email: email.trim(),
+        code: regCode.trim(),
         password,
         username: username.trim(),
       });
 
       if (res.success) {
-        setSuccess("Аккаунт успешно создан! Теперь вы можете войти.");
+        setSuccess("Аккаунт успешно создан и подтвержден! Теперь вы можете войти.");
+        setRegStage(1);
+        setRegCode("");
         setMode("login");
       } else {
-        setError(res.message || "Ошибка при создании аккаунта.");
+        setError(res.message || "Ошибка подтверждения кода или создания аккаунта.");
       }
     } catch (err: any) {
       setError(`Ошибка: ${err?.message || err}`);
@@ -631,194 +700,264 @@ export default function App() {
             )}
 
             {/* Form */}
-            <form
-              className="auth-form"
-              onSubmit={mode === "login" ? handleLogin : handleRegister}
-            >
-              {/* Username (Register mode only) */}
-              {mode === "register" && (
+            {mode === "register" && regStage === 2 ? (
+              <form className="auth-form" onSubmit={handleCompleteRegistration}>
+                <div style={{ textAlign: "center", marginBottom: 12 }}>
+                  <div style={{ fontSize: 13, color: "var(--text-secondary, #94a3b8)", lineHeight: 1.5 }}>
+                    На почту <strong style={{ color: "var(--text-primary, #fff)" }}>{email.trim()}</strong> отправлен 6-значный проверочный код.
+                    Введите его для подтверждения адреса:
+                  </div>
+                </div>
+
+                <OtpInput
+                  value={regCode}
+                  onChange={(code) => setRegCode(code)}
+                  disabled={loading}
+                />
+
+                <button
+                  type="submit"
+                  className="btn-primary"
+                  disabled={loading || regCode.length < 6}
+                >
+                  {loading ? (
+                    <>
+                      <SpinnerIcon className="w-5 h-5" />
+                      <span>Создание аккаунта...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>Завершить регистрацию</span>
+                      <CheckCircleIcon className="w-5 h-5" />
+                    </>
+                  )}
+                </button>
+
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8 }}>
+                  <button
+                    type="button"
+                    className="forgot-link"
+                    style={{ background: "none", border: "none", cursor: "pointer", padding: 0 }}
+                    onClick={() => {
+                      setRegStage(1);
+                      setError(null);
+                      setSuccess(null);
+                    }}
+                  >
+                    ← Изменить данные
+                  </button>
+
+                  <button
+                    type="button"
+                    className="forgot-link"
+                    style={{
+                      background: "none",
+                      border: "none",
+                      cursor: regCooldown > 0 ? "not-allowed" : "pointer",
+                      padding: 0,
+                      opacity: regCooldown > 0 ? 0.6 : 1,
+                    }}
+                    disabled={regCooldown > 0 || loading}
+                    onClick={() => handleRequestRegCode()}
+                  >
+                    {regCooldown > 0 ? `Повтор через ${regCooldown} с` : "Отправить код еще раз"}
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <form
+                className="auth-form"
+                onSubmit={mode === "login" ? handleLogin : handleRequestRegCode}
+              >
+                {/* Username (Register mode only) */}
+                {mode === "register" && (
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="username-input">
+                      Имя пользователя
+                    </label>
+                    <div className="input-container">
+                      <div className="input-icon-left">
+                        <UserIcon />
+                      </div>
+                      <input
+                        id="username-input"
+                        type="text"
+                        className="form-input"
+                        placeholder="Например: Иван Иванов"
+                        value={username}
+                        onChange={(e) => setUsername(e.target.value)}
+                        required
+                        autoComplete="name"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Email Address */}
                 <div className="form-group">
-                  <label className="form-label" htmlFor="username-input">
-                    Имя пользователя
+                  <label className="form-label" htmlFor="email-input">
+                    Электронная почта
                   </label>
                   <div className="input-container">
                     <div className="input-icon-left">
-                      <UserIcon />
+                      <MailIcon />
                     </div>
                     <input
-                      id="username-input"
-                      type="text"
+                      id="email-input"
+                      type="email"
                       className="form-input"
-                      placeholder="Например: Иван Иванов"
-                      value={username}
-                      onChange={(e) => setUsername(e.target.value)}
+                      placeholder="user@example.com"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
                       required
-                      autoComplete="name"
+                      autoComplete="email"
                     />
                   </div>
                 </div>
-              )}
 
-              {/* Email Address */}
-              <div className="form-group">
-                <label className="form-label" htmlFor="email-input">
-                  Электронная почта
-                </label>
-                <div className="input-container">
-                  <div className="input-icon-left">
-                    <MailIcon />
-                  </div>
-                  <input
-                    id="email-input"
-                    type="email"
-                    className="form-input"
-                    placeholder="user@example.com"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    required
-                    autoComplete="email"
-                  />
-                </div>
-              </div>
-
-              {/* Password */}
-              <div className="form-group">
-                <label className="form-label" htmlFor="password-input">
-                  Пароль
-                </label>
-                <div className="input-container">
-                  <div className="input-icon-left">
-                    <LockIcon />
-                  </div>
-                  <input
-                    id="password-input"
-                    type={showPassword ? "text" : "password"}
-                    className="form-input has-right-icon"
-                    placeholder="••••••••••••••••"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    required
-                    autoComplete={mode === "login" ? "current-password" : "new-password"}
-                  />
-                  <button
-                    type="button"
-                    className="input-icon-right"
-                    onClick={() => setShowPassword(!showPassword)}
-                    tabIndex={-1}
-                    aria-label={showPassword ? "Скрыть пароль" : "Показать пароль"}
-                  >
-                    {showPassword ? <EyeOffIcon /> : <EyeIcon />}
-                  </button>
-                </div>
-              </div>
-
-              {/* Confirm Password (Register mode) */}
-              {mode === "register" && (
+                {/* Password */}
                 <div className="form-group">
-                  <label className="form-label" htmlFor="confirm-password-input">
-                    Подтверждение пароля
+                  <label className="form-label" htmlFor="password-input">
+                    Пароль
                   </label>
                   <div className="input-container">
                     <div className="input-icon-left">
                       <LockIcon />
                     </div>
                     <input
-                      id="confirm-password-input"
+                      id="password-input"
                       type={showPassword ? "text" : "password"}
-                      className="form-input"
+                      className="form-input has-right-icon"
                       placeholder="••••••••••••••••"
-                      value={confirmPassword}
-                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
                       required
+                      autoComplete={mode === "login" ? "current-password" : "new-password"}
                     />
+                    <button
+                      type="button"
+                      className="input-icon-right"
+                      onClick={() => setShowPassword(!showPassword)}
+                      tabIndex={-1}
+                      aria-label={showPassword ? "Скрыть пароль" : "Показать пароль"}
+                    >
+                      {showPassword ? <EyeOffIcon /> : <EyeIcon />}
+                    </button>
                   </div>
                 </div>
-              )}
 
-              {/* Remember Me & Forgot Password (Login mode) */}
-              {mode === "login" && (
-                <div className="form-options-row">
-                  <label className="remember-label">
-                    <input
-                      type="checkbox"
-                      className="custom-checkbox"
-                      checked={rememberMe}
-                      onChange={(e) => setRememberMe(e.target.checked)}
-                    />
-                    <span>Запомнить на 30 дней</span>
-                  </label>
-
-                  <span
-                    className="forgot-link"
-                    onClick={() => {
-                      setMode("reset");
-                      setResetStage(1);
-                      setResetEmail(email.trim());
-                      setError(null);
-                      setSuccess(null);
-                    }}
-                  >
-                    Забыли пароль?
-                  </span>
-                </div>
-              )}
-
-              {/* Submit Button */}
-              <button
-                type="submit"
-                className="btn-primary"
-                disabled={loading}
-              >
-                {loading ? (
-                  <>
-                    <SpinnerIcon className="w-5 h-5" />
-                    <span>Подождите...</span>
-                  </>
-                ) : (
-                  <>
-                    <span>{mode === "login" ? "Войти" : "Зарегистрироваться"}</span>
-                    <ArrowRightLoginIcon className="w-5 h-5" />
-                  </>
+                {/* Confirm Password (Register mode) */}
+                {mode === "register" && (
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="confirm-password-input">
+                      Подтверждение пароля
+                    </label>
+                    <div className="input-container">
+                      <div className="input-icon-left">
+                        <LockIcon />
+                      </div>
+                      <input
+                        id="confirm-password-input"
+                        type={showPassword ? "text" : "password"}
+                        className="form-input"
+                        placeholder="••••••••••••••••"
+                        value={confirmPassword}
+                        onChange={(e) => setConfirmPassword(e.target.value)}
+                        required
+                      />
+                    </div>
+                  </div>
                 )}
-              </button>
 
-              {/* Switch Mode Link */}
-              <div style={{ textAlign: "center", marginTop: 8 }}>
-                <span className="signup-hint">
-                  {mode === "login" ? (
+                {/* Remember Me & Forgot Password (Login mode) */}
+                {mode === "login" && (
+                  <div className="form-options-row">
+                    <label className="remember-label">
+                      <input
+                        type="checkbox"
+                        className="custom-checkbox"
+                        checked={rememberMe}
+                        onChange={(e) => setRememberMe(e.target.checked)}
+                      />
+                      <span>Запомнить на 30 дней</span>
+                    </label>
+
+                    <span
+                      className="forgot-link"
+                      onClick={() => {
+                        setMode("reset");
+                        setResetStage(1);
+                        setResetEmail(email.trim());
+                        setError(null);
+                        setSuccess(null);
+                      }}
+                    >
+                      Забыли пароль?
+                    </span>
+                  </div>
+                )}
+
+                {/* Submit Button */}
+                <button
+                  type="submit"
+                  className="btn-primary"
+                  disabled={loading}
+                >
+                  {loading ? (
                     <>
-                      Нет аккаунта?{" "}
-                      <span
-                        className="signup-link"
-                        onClick={() => {
-                          setMode("register");
-                          setUsername("");
-                          setError(null);
-                          setSuccess(null);
-                        }}
-                      >
-                        Зарегистрироваться
-                      </span>
+                      <SpinnerIcon className="w-5 h-5" />
+                      <span>Подождите...</span>
                     </>
                   ) : (
                     <>
-                      Уже есть аккаунт?{" "}
-                      <span
-                        className="signup-link"
-                        onClick={() => {
-                          setMode("login");
-                          setUsername("");
-                          setError(null);
-                          setSuccess(null);
-                        }}
-                      >
-                        Войти
-                      </span>
+                      <span>{mode === "login" ? "Войти" : "Получить проверочный код"}</span>
+                      <ArrowRightLoginIcon className="w-5 h-5" />
                     </>
                   )}
-                </span>
-              </div>
-            </form>
+                </button>
+
+                {/* Switch Mode Link */}
+                <div style={{ textAlign: "center", marginTop: 8 }}>
+                  <span className="signup-hint">
+                    {mode === "login" ? (
+                      <>
+                        Нет аккаунта?{" "}
+                        <span
+                          className="signup-link"
+                          onClick={() => {
+                            setMode("register");
+                            setRegStage(1);
+                            setRegCode("");
+                            setUsername("");
+                            setError(null);
+                            setSuccess(null);
+                          }}
+                        >
+                          Зарегистрироваться
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        Уже есть аккаунт?{" "}
+                        <span
+                          className="signup-link"
+                          onClick={() => {
+                            setMode("login");
+                            setRegStage(1);
+                            setRegCode("");
+                            setUsername("");
+                            setError(null);
+                            setSuccess(null);
+                          }}
+                        >
+                          Войти
+                        </span>
+                      </>
+                    )}
+                  </span>
+                </div>
+              </form>
+            )}
           </div>
         </main>
       )}

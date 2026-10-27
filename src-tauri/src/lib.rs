@@ -36,6 +36,28 @@ async fn register(email: String, password: String, username: Option<String>) -> 
 }
 
 #[tauri::command]
+async fn request_registration_code(email: String, username: Option<String>) -> Result<ResetRequestResponse, String> {
+    Ok(auth::request_registration_code(&email, username.as_deref()).await)
+}
+
+#[tauri::command]
+async fn register_with_code(
+    email: String,
+    code: String,
+    password: String,
+    username: Option<String>,
+) -> Result<AuthResponse, String> {
+    Ok(auth::register_with_code(&email, &code, &password, username.as_deref()).await)
+}
+
+#[tauri::command]
+async fn validate_email(email: String) -> Result<bool, String> {
+    let (_, domain) = auth::validate_email_syntax(&email)?;
+    auth::verify_domain_exists(domain).await?;
+    Ok(true)
+}
+
+#[tauri::command]
 async fn request_reset_code(email: String) -> Result<ResetRequestResponse, String> {
     Ok(auth::request_reset_code(&email).await)
 }
@@ -194,6 +216,9 @@ pub fn run() {
             check_db,
             login,
             register,
+            request_registration_code,
+            register_with_code,
+            validate_email,
             request_reset_code,
             verify_reset_code,
             reset_password,
