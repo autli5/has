@@ -132,7 +132,7 @@ pub fn get_db_config() -> DbConfig {
         None
     };
     let dbname = extract_clean_env("DB_NAME", "has");
-    let ssl_mode = extract_clean_env("DB_SSL_MODE", "prefer").to_lowercase();
+    let ssl_mode = extract_clean_env("DB_SSL_MODE", "disable").to_lowercase();
 
     let users_table = extract_clean_env("DB_USERS_TABLE", "users");
     let email_column = extract_clean_env("DB_EMAIL_COLUMN", "email");
@@ -205,17 +205,20 @@ pub async fn connect_to_db(config: &DbConfig) -> Result<tokio_postgres::Client, 
         .map_err(|e| format!("Семафор БД: {}", e))?;
 
     let conn_str = build_conn_string(config);
-    let connect_timeout = std::time::Duration::from_secs(4);
+    let connect_timeout = std::time::Duration::from_secs(10);
 
-    // Try SSL if mode is 'require' or 'prefer'
-    if config.ssl_mode == "require" || config.ssl_mode == "prefer" {
+    // Try SSL ONLY if mode is 'require', or if 'prefer' and not known to be NoTls
+    static KNOWN_NOTLS_SERVER: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+    if config.ssl_mode == "require" || (config.ssl_mode == "prefer" && !KNOWN_NOTLS_SERVER.load(std::sync::atomic::Ordering::Relaxed)) {
         let mut builder = native_tls::TlsConnector::builder();
         builder.danger_accept_invalid_certs(true); // Allow self-signed certs for remote VPS
 
         if let Ok(tls_connector) = builder.build() {
             let tls = postgres_native_tls::MakeTlsConnector::new(tls_connector);
             let conn_future = tokio_postgres::connect(&conn_str, tls);
-            match tokio::time::timeout(connect_timeout, conn_future).await {
+            let tls_timeout = if config.ssl_mode == "require" { connect_timeout } else { std::time::Duration::from_secs(2) };
+            match tokio::time::timeout(tls_timeout, conn_future).await {
                 Ok(Ok((client, connection))) => {
                     tokio::spawn(async move {
                         if let Err(e) = connection.await {
@@ -228,12 +231,14 @@ pub async fn connect_to_db(config: &DbConfig) -> Result<tokio_postgres::Client, 
                     if config.ssl_mode == "require" {
                         return Err(format!("TLS connection failed: {}", e));
                     }
+                    KNOWN_NOTLS_SERVER.store(true, std::sync::atomic::Ordering::Relaxed);
                     // If prefer, fallback to NoTls below
                 }
                 Err(_) => {
                     if config.ssl_mode == "require" {
                         return Err("Таймаут безопасного подключения (TLS). Сервер не отвечает.".to_string());
                     }
+                    KNOWN_NOTLS_SERVER.store(true, std::sync::atomic::Ordering::Relaxed);
                     // If prefer, fallback to NoTls below
                 }
             }
@@ -257,7 +262,7 @@ pub async fn connect_to_db(config: &DbConfig) -> Result<tokio_postgres::Client, 
             Err("Не удалось подключиться к серверу базы данных. Попробуйте позже.".to_string())
         }
         Err(_) => {
-            Err("Таймаут подключения к серверу базы данных. Сервер не ответил за 4 сек.".to_string())
+            Err("Таймаут подключения к серверу базы данных. Сервер не ответил за 10 сек.".to_string())
         }
     }
 }

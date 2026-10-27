@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicBool, Ordering};
 use crate::auth::{connect_to_db, get_db_config};
+
+static SCHEMA_INITIALIZED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct UserProfileDto {
@@ -27,6 +30,10 @@ pub struct UserProfileSaveDto {
 }
 
 pub async fn init_profile_columns(client: &tokio_postgres::Client) {
+    if SCHEMA_INITIALIZED.load(Ordering::Relaxed) {
+        return;
+    }
+
     let sqls = [
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar TEXT;",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS bio TEXT;",
@@ -38,6 +45,8 @@ pub async fn init_profile_columns(client: &tokio_postgres::Client) {
     for statement in sqls {
         let _ = client.execute(statement, &[]).await;
     }
+
+    SCHEMA_INITIALIZED.store(true, Ordering::Relaxed);
 }
 
 async fn get_existing_user_columns(client: &tokio_postgres::Client) -> HashSet<String> {
@@ -54,16 +63,12 @@ async fn get_existing_user_columns(client: &tokio_postgres::Client) -> HashSet<S
         .collect()
 }
 
-#[tauri::command]
-pub async fn get_user_profile(user_email: String) -> Result<UserProfileDto, String> {
-    let clean_email = user_email.trim().to_lowercase();
-    let config = get_db_config();
-    let client = connect_to_db(&config).await?;
-    
-    // Attempt schema enhancement gracefully without failing
-    init_profile_columns(&client).await;
-
-    let cols = get_existing_user_columns(&client).await;
+async fn fetch_profile_with_client(
+    client: &tokio_postgres::Client,
+    clean_email: &str,
+) -> Result<UserProfileDto, String> {
+    init_profile_columns(client).await;
+    let cols = get_existing_user_columns(client).await;
 
     let username_sel = if cols.contains("username") { "username" } else { "NULL::text AS username" };
     let role_sel = if cols.contains("role") { "COALESCE(role, 'user')" } else { "'user'::text AS role" };
@@ -104,6 +109,14 @@ pub async fn get_user_profile(user_email: String) -> Result<UserProfileDto, Stri
 }
 
 #[tauri::command]
+pub async fn get_user_profile(user_email: String) -> Result<UserProfileDto, String> {
+    let clean_email = user_email.trim().to_lowercase();
+    let config = get_db_config();
+    let client = connect_to_db(&config).await?;
+    fetch_profile_with_client(&client, &clean_email).await
+}
+
+#[tauri::command]
 pub async fn save_user_profile(
     user_email: String,
     profile: UserProfileSaveDto,
@@ -112,45 +125,40 @@ pub async fn save_user_profile(
     let config = get_db_config();
     let client = connect_to_db(&config).await?;
     
-    // Attempt schema enhancement gracefully
     init_profile_columns(&client).await;
-
     let cols = get_existing_user_columns(&client).await;
 
     let clean_username = profile.username.as_deref().map(|s| s.trim()).filter(|s| !s.is_empty());
     let clean_bio = profile.bio.as_deref().map(|s| s.trim());
     let avatar = profile.avatar.filter(|s| !s.trim().is_empty());
 
-    if cols.contains("username") {
+    // Single unified UPDATE if columns exist
+    if cols.contains("username") || cols.contains("avatar") || cols.contains("bio") {
+        let update_sql = "UPDATE users SET \
+            username = CASE WHEN $1::text IS NOT NULL THEN $1 ELSE username END, \
+            avatar = CASE WHEN $2::text IS NOT NULL THEN $2 ELSE avatar END, \
+            bio = $3, \
+            notify_email = $4, \
+            notify_sound = $5, \
+            notify_security = $6 \
+            WHERE LOWER(email) = LOWER($7);";
+        
         let _ = client
-            .execute("UPDATE users SET username = $1 WHERE LOWER(email) = LOWER($2);", &[&clean_username, &clean_email])
-            .await;
-    }
-    if cols.contains("avatar") {
-        let _ = client
-            .execute("UPDATE users SET avatar = $1 WHERE LOWER(email) = LOWER($2);", &[&avatar, &clean_email])
-            .await;
-    }
-    if cols.contains("bio") {
-        let _ = client
-            .execute("UPDATE users SET bio = $1 WHERE LOWER(email) = LOWER($2);", &[&clean_bio, &clean_email])
-            .await;
-    }
-    if cols.contains("notify_email") {
-        let _ = client
-            .execute("UPDATE users SET notify_email = $1 WHERE LOWER(email) = LOWER($2);", &[&profile.notify_email, &clean_email])
-            .await;
-    }
-    if cols.contains("notify_sound") {
-        let _ = client
-            .execute("UPDATE users SET notify_sound = $1 WHERE LOWER(email) = LOWER($2);", &[&profile.notify_sound, &clean_email])
-            .await;
-    }
-    if cols.contains("notify_security") {
-        let _ = client
-            .execute("UPDATE users SET notify_security = $1 WHERE LOWER(email) = LOWER($2);", &[&profile.notify_security, &clean_email])
+            .execute(
+                update_sql,
+                &[
+                    &clean_username,
+                    &avatar,
+                    &clean_bio,
+                    &profile.notify_email,
+                    &profile.notify_sound,
+                    &profile.notify_security,
+                    &clean_email,
+                ],
+            )
             .await;
     }
 
-    get_user_profile(clean_email).await
+    // Reuse the exact same client connection without reconnecting!
+    fetch_profile_with_client(&client, &clean_email).await
 }

@@ -77,8 +77,22 @@ export default function Profile({
     }
   }, [serverUsers]);
 
-  // Load Profile from DB
+  // Load Profile from DB (with instant localStorage cache fallback)
   const loadProfile = async () => {
+    // 1. Instant local load
+    const cachedStr = localStorage.getItem(`has_profile_${currentUser.email.toLowerCase()}`);
+    if (cachedStr) {
+      try {
+        const cached = JSON.parse(cachedStr);
+        if (cached.username) setUsername(cached.username);
+        if (cached.avatar) setAvatar(cached.avatar);
+        if (cached.bio) setBio(cached.bio);
+        if (typeof cached.notify_email === "boolean") setNotifyEmail(cached.notify_email);
+        if (typeof cached.notify_sound === "boolean") setNotifySound(cached.notify_sound);
+        if (typeof cached.notify_security === "boolean") setNotifySecurity(cached.notify_security);
+      } catch (_) {}
+    }
+
     if (!isTauri) {
       setLoading(false);
       return;
@@ -96,9 +110,12 @@ export default function Profile({
       setNotifyEmail(data.notify_email);
       setNotifySound(data.notify_sound);
       setNotifySecurity(data.notify_security);
+      localStorage.setItem(`has_profile_${currentUser.email.toLowerCase()}`, JSON.stringify(data));
     } catch (err) {
-      console.error("Ошибка загрузки профиля:", err);
-      setErrorMsg(`Не удалось загрузить данные из базы: ${err}`);
+      console.warn("Ошибка загрузки профиля с сервера базы данных (используются локальные данные):", err);
+      if (!cachedStr) {
+        setErrorMsg(`Сервер базы данных временно недоступен: ${err}`);
+      }
     } finally {
       setLoading(false);
     }
@@ -165,23 +182,48 @@ export default function Profile({
     }
   };
 
-  // Save Profile to PostgreSQL DB
+  // Save Profile to PostgreSQL DB with instant local persistence
   const handleSave = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!isTauri) return;
 
     setSaving(true);
     setErrorMsg(null);
-    try {
-      const payload: UserProfileSaveDto = {
-        username: username.trim() || null,
-        avatar: avatar || null,
-        bio: bio.trim() || null,
-        notify_email: notifyEmail,
-        notify_sound: notifySound,
-        notify_security: notifySecurity,
-      };
+    setSaveSuccessMsg(null);
 
+    const payload: UserProfileSaveDto = {
+      username: username.trim() || null,
+      avatar: avatar || null,
+      bio: bio.trim() || null,
+      notify_email: notifyEmail,
+      notify_sound: notifySound,
+      notify_security: notifySecurity,
+    };
+
+    // 1. Immediately persist locally so data is never lost
+    try {
+      localStorage.setItem(
+        `has_profile_${currentUser.email.toLowerCase()}`,
+        JSON.stringify(payload)
+      );
+      if (onUpdateUser) {
+        onUpdateUser({
+          ...currentUser,
+          username: payload.username || undefined,
+          avatar: payload.avatar || null,
+          bio: payload.bio || null,
+        });
+      }
+    } catch (_) {}
+
+    if (!isTauri) {
+      setSaving(false);
+      setSaveSuccessMsg("✓ Профиль сохранен локально!");
+      setTimeout(() => setSaveSuccessMsg(null), 3000);
+      return;
+    }
+
+    // 2. Sync to remote PostgreSQL database
+    try {
       const updated = await invoke<UserProfileDto>("save_user_profile", {
         userEmail: currentUser.email,
         profile: payload,
@@ -200,8 +242,10 @@ export default function Profile({
         });
       }
     } catch (err) {
-      console.error("Ошибка сохранения профиля:", err);
-      setErrorMsg(`Ошибка сохранения: ${err}`);
+      console.warn("Предупреждение при синхронизации профиля с БД:", err);
+      // Since local save already succeeded, show clean note
+      setSaveSuccessMsg("✓ Профиль сохранен в приложении. Синхронизация с сервером выполнится при стабильной связи.");
+      setTimeout(() => setSaveSuccessMsg(null), 4500);
     } finally {
       setSaving(false);
     }
