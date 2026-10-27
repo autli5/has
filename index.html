@@ -7,9 +7,10 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <title>has</title>
-    <!-- HAS Cinema AdGuard & Anti-Popup Shield -->
+    <!-- HAS Cinema AdGuard & Anti-Popup Shield (WebView Network & DOM Interceptor) -->
     <script>
       (function() {
+        // 1. Anti-Popup & Tab Hijack Guard
         try {
           const fakeWindow = {
             closed: true,
@@ -25,26 +26,117 @@
           };
         } catch (_) {}
 
+        // 2. Comprehensive Ad & Casino Blacklist Patterns (Riobet, 1xBet, Vavada, Bet networks)
         const AD_PATTERNS = [
-          /1xbet/i, /vavada/i, /mostbet/i, /pin-up/i, /bet365/i, /casino/i,
+          /riobet/i, /1xbet/i, /vavada/i, /mostbet/i, /pin-up/i, /bet365/i, /casino/i,
           /adsterra/i, /propellerads/i, /popcash/i, /monetag/i, /clickadu/i,
           /exoclick/i, /juicyads/i, /adcash/i, /trafficjunky/i, /syndication/i,
-          /delivembd/i, /betandyou/i, /melbet/i, /linebet/i, /fonbet/i, /parimatch/i
+          /delivembd/i, /betandyou/i, /melbet/i, /linebet/i, /fonbet/i, /parimatch/i,
+          /advmaker/i, /trafox/i, /adsupply/i, /marketgid/i, /mgid/i, /yadro\.ru/i,
+          /betboom/i, /vulkan/i, /joycasino/i, /admiral/i, /champion/i
         ];
 
+        const VAST_PATTERNS = [
+          /\/vast/i, /\/vpaid/i, /vast\.xml/i, /vpaid\.js/i, /adservice/i,
+          /doubleclick\.net/i, /aniview/i, /adform/i, /adman/i
+        ];
+
+        function isAdUrl(url) {
+          if (!url || typeof url !== "string") return false;
+          for (let i = 0; i < AD_PATTERNS.length; i++) {
+            if (AD_PATTERNS[i].test(url)) return true;
+          }
+          return false;
+        }
+
+        function isVastUrl(url) {
+          if (!url || typeof url !== "string") return false;
+          for (let i = 0; i < VAST_PATTERNS.length; i++) {
+            if (VAST_PATTERNS[i].test(url)) return true;
+          }
+          return false;
+        }
+
+        // 3. Network Interceptor: Block VAST & Casino Ad Requests in fetch()
+        if (typeof window.fetch === "function") {
+          const origFetch = window.fetch;
+          window.fetch = function(input, init) {
+            const url = typeof input === "string" ? input : (input && input.url ? input.url : "");
+            if (isAdUrl(url)) {
+              console.warn("[HAS AdGuard] Blocked ad fetch:", url);
+              return Promise.reject(new Error("Blocked by HAS AdGuard"));
+            }
+            if (isVastUrl(url)) {
+              console.warn("[HAS AdGuard] Intercepted VAST ad request, bypassing:", url);
+              // Return empty VAST 3.0 response to trigger instant ad bypass in video players
+              return Promise.resolve(new Response(
+                '<?xml version="1.0" encoding="UTF-8"?><VAST version="3.0"/>',
+                { status: 200, headers: { "Content-Type": "text/xml" } }
+              ));
+            }
+            return origFetch.apply(this, arguments);
+          };
+        }
+
+        // 4. Network Interceptor: Block VAST & Casino Ad Requests in XMLHttpRequest
+        if (typeof window.XMLHttpRequest === "function") {
+          const origOpen = XMLHttpRequest.prototype.open;
+          const origSend = XMLHttpRequest.prototype.send;
+          XMLHttpRequest.prototype.open = function(method, url) {
+            this._hasUrl = typeof url === "string" ? url : "";
+            return origOpen.apply(this, arguments);
+          };
+          XMLHttpRequest.prototype.send = function() {
+            if (isAdUrl(this._hasUrl)) {
+              console.warn("[HAS AdGuard] Blocked XHR ad request:", this._hasUrl);
+              this.abort();
+              return;
+            }
+            if (isVastUrl(this._hasUrl)) {
+              console.warn("[HAS AdGuard] Mocking empty VAST for XHR:", this._hasUrl);
+              Object.defineProperty(this, "responseText", { value: '<?xml version="1.0" encoding="UTF-8"?><VAST version="3.0"/>' });
+              Object.defineProperty(this, "responseXML", {
+                value: new DOMParser().parseFromString('<VAST version="3.0"/>', "text/xml")
+              });
+              Object.defineProperty(this, "status", { value: 200 });
+              Object.defineProperty(this, "readyState", { value: 4 });
+              setTimeout(() => {
+                if (typeof this.onreadystatechange === "function") this.onreadystatechange();
+                if (typeof this.onload === "function") this.onload();
+              }, 10);
+              return;
+            }
+            return origSend.apply(this, arguments);
+          };
+        }
+
+        // 5. Click Interceptor for ad redirects
         document.addEventListener("click", function(e) {
           const a = e.target && e.target.closest ? e.target.closest("a") : null;
-          if (a && a.href) {
-            for (let i = 0; i < AD_PATTERNS.length; i++) {
-              if (AD_PATTERNS[i].test(a.href)) {
-                e.preventDefault();
-                e.stopPropagation();
-                console.warn("[HAS AdGuard] Intercepted ad redirect:", a.href);
-                return;
-              }
-            }
+          if (a && a.href && isAdUrl(a.href)) {
+            e.preventDefault();
+            e.stopPropagation();
+            console.warn("[HAS AdGuard] Intercepted ad redirect:", a.href);
           }
         }, true);
+
+        // 6. Automatic Ad-Skip Button Clicker
+        setInterval(function() {
+          try {
+            const skipSelectors = [
+              ".skip-ad", ".ad-skip", ".videoAdUiSkipButton",
+              "button.skip", "[class*='skip-button']", "[class*='skip_ad']",
+              ".preroll-skip", "#skip-ad-button", ".ad-skip-btn"
+            ];
+            for (let i = 0; i < skipSelectors.length; i++) {
+              const btn = document.querySelector(skipSelectors[i]);
+              if (btn && typeof btn.click === "function") {
+                console.log("[HAS AdGuard] Auto-clicking skip button:", skipSelectors[i]);
+                btn.click();
+              }
+            }
+          } catch (_) {}
+        }, 300);
       })();
     </script>
   </head>

@@ -91,7 +91,7 @@ export function UpdaterBanner({ isTvEnvironment }: UpdaterBannerProps = {}) {
         const resp = await fetch("https://github.com/autli5/has/releases/latest/download/latest.json");
         if (resp.ok) {
           const data = await resp.json();
-          if (!cancelled && data?.version && data.version !== "0.0.10") {
+          if (!cancelled && data?.version && data.version !== "0.0.11") {
             setUpdateAvailable(true);
             setUpdateInfo({
               version: data.version,

@@ -577,7 +577,9 @@ export default function Cinema({
   const [, setConfig] = useState<CinemaConfig>({ tmdb_api_key: null });
 
   // Navigation Filter
-  const [activeTab, setActiveTab] = useState<"home" | "movies" | "series" | "anime" | "bookmarks" | "search">("home");
+  const [activeTab, setActiveTab] = useState<
+    "home" | "movies" | "series" | "anime" | "bookmarks" | "history" | "search"
+  >("home");
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<CinemaMediaItem[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -1097,6 +1099,122 @@ export default function Cinema({
     }
   };
 
+  // Remove individual item from watch history
+  const handleRemoveHistoryItem = async (e: React.MouseEvent, h: CinemaPlayback) => {
+    e.stopPropagation();
+    if (isTauri) {
+      try {
+        const nextState = await invoke<CinemaState>("remove_cinema_history_item", {
+          titleId: h.title_id,
+          season: h.season,
+          episode: h.episode,
+          userEmail: currentUser?.email,
+        });
+        setCinemaState(nextState);
+      } catch (err) {
+        console.error("Error removing history item:", err);
+      }
+    } else {
+      setCinemaState((prev) => ({
+        ...prev,
+        history: prev.history.filter(
+          (item) => !(item.title_id === h.title_id && item.season === h.season && item.episode === h.episode)
+        ),
+      }));
+    }
+    showTvToast("Удалено из истории", "🗑", 1200);
+    playTvBackBeep();
+  };
+
+  // Clear all watch history
+  const handleClearHistory = async () => {
+    if (isTauri) {
+      try {
+        const nextState = await invoke<CinemaState>("clear_cinema_history", {
+          userEmail: currentUser?.email,
+        });
+        setCinemaState(nextState);
+      } catch (err) {
+        console.error("Error clearing history:", err);
+      }
+    } else {
+      setCinemaState((prev) => ({ ...prev, history: [] }));
+    }
+    showTvToast("История просмотров очищена", "🗑", 1500);
+    playTvBackBeep();
+  };
+
+  // Format date for history view
+  const formatHistoryDate = (isoString?: string): string => {
+    if (!isoString) return "";
+    try {
+      const date = new Date(isoString);
+      const now = new Date();
+      const diffMs = now.getTime() - date.getTime();
+      const diffMins = Math.floor(diffMs / 60000);
+      const diffHours = Math.floor(diffMins / 60);
+      const diffDays = Math.floor(diffHours / 24);
+
+      if (diffMins < 5) return "Только что";
+      if (diffMins < 60) return `${diffMins} мин назад`;
+      if (diffHours < 24 && date.getDate() === now.getDate()) {
+        return `Сегодня, ${date.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}`;
+      }
+      if (diffDays === 1 || (diffHours < 48 && date.getDate() === now.getDate() - 1)) {
+        return `Вчера, ${date.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}`;
+      }
+      return date.toLocaleDateString("ru-RU", { day: "numeric", month: "short" });
+    } catch {
+      return "";
+    }
+  };
+
+  // Play an item directly from history
+  const handlePlayHistoryItem = (h: CinemaPlayback) => {
+    const found = [
+      ...allTrending,
+      ...allMoviesList,
+      ...allSeriesList,
+      ...allAnimeList,
+    ].find((item) => item.id === h.title_id);
+
+    if (found) {
+      handleMediaCardClick(found);
+    } else {
+      const tmdbMatch = h.title_id.match(/tmdb-(movie|tv)-(\d+)/);
+      const isTv = tmdbMatch ? tmdbMatch[1] === "tv" : h.season > 0 && h.episode > 0;
+      const tmdbId = tmdbMatch ? parseInt(tmdbMatch[2], 10) : undefined;
+      const fallbackItem: CinemaMediaItem = {
+        id: h.title_id,
+        tmdb_id: tmdbId,
+        media_type: isTv ? "tv" : "movie",
+        title: h.title_name,
+        poster_url: h.poster_path || INITIAL_LIBRARY[0].poster_url,
+        backdrop_url: h.backdrop_path || INITIAL_LIBRARY[0].backdrop_url,
+        genre: isTv ? "Сериал" : "Фильм",
+        synopsis: `Продолжение просмотра: ${h.title_name}`,
+        release_year: "2024",
+        rating: 8.5,
+        is_original: false,
+        seasons: [
+          {
+            season_number: h.season || 1,
+            episodes: [
+              {
+                id: `ep-${h.title_id}-${h.season}-${h.episode}`,
+                number: h.episode || 1,
+                title: `Серия ${h.episode || 1}`,
+                thumbnail: h.poster_path || INITIAL_LIBRARY[0].poster_url,
+                duration_minutes: Math.round((h.duration_seconds || 3600) / 60),
+              },
+            ],
+          },
+        ],
+      };
+      handleMediaCardClick(fallbackItem);
+    }
+  };
+
   // Get progress for a specific episode
   const getEpisodeProgress = (seasonNum: number, episodeNum: number): number => {
     const found = cinemaState.history.find(
@@ -1406,13 +1524,11 @@ export default function Cinema({
             if (info.imdb_id) setCurrentImdbId(info.imdb_id);
             if (info.iframe_url) {
               setCurrentAllohaUrl(info.iframe_url);
-              if (!isAnime) {
-                setSelectedMirror("alloha_ru");
-              }
+              // Do not automatically switch to Alloha to avoid Riobet ads and low-bitrate audio hiss
             }
             if (!isAnime) {
               setRussianDubNotice(
-                `🇷🇺 Русская озвучка подключена: «${info.russian_title || media.title}» воспроизводится с полным русским дубляжем.`
+                `🇷🇺 Доступно: «${info.russian_title || media.title}» в чистом качестве.`
               );
             }
           }
@@ -1428,9 +1544,6 @@ export default function Cinema({
             if (d?.id_imdb) setCurrentImdbId(d.id_imdb);
             if (d?.iframe) {
               setCurrentAllohaUrl(d.iframe);
-              if (!isAnime) {
-                setSelectedMirror("alloha_ru");
-              }
             }
           }
         })
@@ -2514,6 +2627,24 @@ export default function Cinema({
       }
       const finalDubbings = Array.from(uniqueStudios.values());
 
+      // Prioritize official studio dubbings and clean audio tracks over amateur mic overdubs
+      finalDubbings.sort((a, b) => {
+        const titleA = (a.translation?.title || "").toLowerCase();
+        const titleB = (b.translation?.title || "").toLowerCase();
+
+        const getQualityScore = (t: string) => {
+          if (t.includes("полный дубляж") || t.includes("дубляж") || t.includes("чистый звук")) return 100;
+          if (t.includes("пифагор") || t.includes("мосфильм") || t.includes("невафильм") || t.includes("кириллица")) return 95;
+          if (t.includes("red head sound") || t.includes("rhs") || t.includes("flarrow films")) return 90;
+          if (t.includes("lostfilm") || t.includes("hdrezka") || t.includes("кубик в кубе") || t.includes("newstudio")) return 80;
+          if (t.includes("tvshows") || t.includes("кураж-бамбей") || t.includes("alexfilm")) return 70;
+          if (t.includes("coldfilm") || t.includes("baibako")) return 15; // Low-bitrate noisy voiceover
+          return 50;
+        };
+
+        return getQualityScore(titleB) - getQualityScore(titleA);
+      });
+
       if (finalDubbings.length > 0) {
         setKodikResults(finalDubbings);
         setSelectedKodikLink(finalDubbings[0].link);
@@ -2758,6 +2889,25 @@ export default function Cinema({
               </span>
             </button>
 
+            <button
+              type="button"
+              className={`has-cinema-tv-nav-item ${activeTab === "history" && !searchQuery ? "active" : ""}`}
+              onClick={() => {
+                setActiveTab("history");
+                setSearchQuery("");
+                setIsTvNavOpen(false);
+                playTvSelectBeep();
+                setTimeout(() => focusFirstContentCard(), 60);
+              }}
+              data-tv-focusable="true"
+              title="История просмотров"
+            >
+              <span className="has-cinema-tv-nav-icon">🕒</span>
+              <span className="has-cinema-tv-nav-label">
+                История {cinemaState.history.length > 0 && `(${cinemaState.history.length})`}
+              </span>
+            </button>
+
             {onNavigateTab && (
               <button
                 type="button"
@@ -2856,6 +3006,18 @@ export default function Cinema({
             data-tv-focusable="true"
           >
             Мой список {cinemaState.bookmarks.length > 0 && `(${cinemaState.bookmarks.length})`}
+          </button>
+          <button
+            type="button"
+            className={`has-cinema-nav-item ${activeTab === "history" && !searchQuery ? "active" : ""}`}
+            onClick={() => {
+              setActiveTab("history");
+              setSearchQuery("");
+              playTvSelectBeep();
+            }}
+            data-tv-focusable="true"
+          >
+            🕒 История {cinemaState.history.length > 0 && `(${cinemaState.history.length})`}
           </button>
         </nav>
 
@@ -3193,7 +3355,20 @@ export default function Cinema({
             {/* Row 1: Continue Watching */}
             {cinemaState.history.length > 0 && activeTab === "home" && (
               <div className="has-cinema-row-block">
-                <h2 className="has-cinema-row-title">Продолжить просмотр</h2>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                  <h2 className="has-cinema-row-title" style={{ margin: 0 }}>Продолжить просмотр</h2>
+                  <button
+                    type="button"
+                    className="has-cinema-row-more-btn"
+                    onClick={() => {
+                      setActiveTab("history");
+                      playTvSelectBeep();
+                    }}
+                    data-tv-focusable="true"
+                  >
+                    Вся история ({cinemaState.history.length}) →
+                  </button>
+                </div>
                 <div className="has-cinema-cards-scroll">
                   {cinemaState.history.map((h, i) => {
                     const percent =
@@ -3203,97 +3378,15 @@ export default function Cinema({
                     return (
                       <div
                         key={`${h.title_id}-${i}`}
-                        className="has-cinema-media-card"
-                        onClick={() => {
-                          const found = [
-                            ...allTrending,
-                            ...allMoviesList,
-                            ...allSeriesList,
-                            ...allAnimeList,
-                          ].find((item) => item.id === h.title_id);
-                          if (found) {
-                            handleMediaCardClick(found);
-                          } else {
-                            const tmdbMatch = h.title_id.match(/tmdb-(movie|tv)-(\d+)/);
-                            const isTv = tmdbMatch ? tmdbMatch[1] === "tv" : h.season > 0 && h.episode > 0;
-                            const tmdbId = tmdbMatch ? parseInt(tmdbMatch[2], 10) : undefined;
-                            const fallbackItem: CinemaMediaItem = {
-                              id: h.title_id,
-                              tmdb_id: tmdbId,
-                              media_type: isTv ? "tv" : "movie",
-                              title: h.title_name,
-                              poster_url: h.poster_path || INITIAL_LIBRARY[0].poster_url,
-                              backdrop_url: h.backdrop_path || INITIAL_LIBRARY[0].backdrop_url,
-                              genre: isTv ? "Сериал" : "Фильм",
-                              synopsis: `Продолжение просмотра: ${h.title_name}`,
-                              release_year: "2024",
-                              rating: 8.5,
-                              is_original: false,
-                              seasons: [
-                                {
-                                  season_number: h.season || 1,
-                                  episodes: [
-                                    {
-                                      id: `ep-${h.title_id}-${h.season}-${h.episode}`,
-                                      number: h.episode || 1,
-                                      title: `Серия ${h.episode || 1}`,
-                                      thumbnail: h.poster_path || INITIAL_LIBRARY[0].poster_url,
-                                      duration_minutes: Math.round((h.duration_seconds || 3600) / 60),
-                                    },
-                                  ],
-                                },
-                              ],
-                            };
-                            handleMediaCardClick(fallbackItem);
-                          }
-                        }}
+                        className="has-cinema-media-card has-cinema-history-card"
+                        onClick={() => handlePlayHistoryItem(h)}
                         data-tv-focusable="true"
                         tabIndex={0}
                         role="button"
                         onKeyDown={(e) => {
                           if (e.key === "Enter" || e.key === " " || e.keyCode === 23 || e.keyCode === 66) {
                             e.preventDefault();
-                            const found = [
-                              ...allTrending,
-                              ...allMoviesList,
-                              ...allSeriesList,
-                              ...allAnimeList,
-                            ].find((item) => item.id === h.title_id);
-                            if (found) {
-                              handleMediaCardClick(found);
-                            } else {
-                              const tmdbMatch = h.title_id.match(/tmdb-(movie|tv)-(\d+)/);
-                              const isTv = tmdbMatch ? tmdbMatch[1] === "tv" : h.season > 0 && h.episode > 0;
-                              const tmdbId = tmdbMatch ? parseInt(tmdbMatch[2], 10) : undefined;
-                              const fallbackItem: CinemaMediaItem = {
-                                id: h.title_id,
-                                tmdb_id: tmdbId,
-                                media_type: isTv ? "tv" : "movie",
-                                title: h.title_name,
-                                poster_url: h.poster_path || INITIAL_LIBRARY[0].poster_url,
-                                backdrop_url: h.backdrop_path || INITIAL_LIBRARY[0].backdrop_url,
-                                genre: isTv ? "Сериал" : "Фильм",
-                                synopsis: `Продолжение просмотра: ${h.title_name}`,
-                                release_year: "2024",
-                                rating: 8.5,
-                                is_original: false,
-                                seasons: [
-                                  {
-                                    season_number: h.season || 1,
-                                    episodes: [
-                                      {
-                                        id: `ep-${h.title_id}-${h.season}-${h.episode}`,
-                                        number: h.episode || 1,
-                                        title: `Серия ${h.episode || 1}`,
-                                        thumbnail: h.poster_path || INITIAL_LIBRARY[0].poster_url,
-                                        duration_minutes: Math.round((h.duration_seconds || 3600) / 60),
-                                      },
-                                    ],
-                                  },
-                                ],
-                              };
-                              handleMediaCardClick(fallbackItem);
-                            }
+                            handlePlayHistoryItem(h);
                           }
                         }}
                       >
@@ -3304,6 +3397,15 @@ export default function Cinema({
                             className="has-cinema-media-thumb"
                             loading="lazy"
                           />
+                          <button
+                            type="button"
+                            className="has-cinema-history-item-del-btn"
+                            onClick={(e) => handleRemoveHistoryItem(e, h)}
+                            title="Удалить из истории"
+                            aria-label="Удалить из истории"
+                          >
+                            ✕
+                          </button>
                           <div className="has-cinema-media-play-overlay">
                             <div className="has-cinema-media-play-circle">▶</div>
                           </div>
@@ -3313,6 +3415,7 @@ export default function Cinema({
                               style={{ width: `${percent}%` }}
                             />
                           </div>
+                          <span className="has-cinema-history-percent-badge">{percent}%</span>
                         </div>
                         <div className="has-cinema-media-meta">
                           <span className="has-cinema-media-title">{h.title_name}</span>
@@ -3532,6 +3635,134 @@ export default function Cinema({
                         </div>
                       </div>
                     ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Row 7: Watch History List */}
+            {activeTab === "history" && (
+              <div className="has-cinema-row-block">
+                <div className="has-cinema-history-header">
+                  <div>
+                    <h2 className="has-cinema-row-title" style={{ margin: 0 }}>История просмотров</h2>
+                    <span className="has-cinema-history-subtitle">
+                      {cinemaState.history.length === 0
+                        ? "Прогресс не зафиксирован"
+                        : `${cinemaState.history.length} ${
+                            cinemaState.history.length === 1
+                              ? "запись"
+                              : cinemaState.history.length < 5
+                              ? "записи"
+                              : "записей"
+                          } • Синхронизировано на всех устройствах`}
+                    </span>
+                  </div>
+                  {cinemaState.history.length > 0 && (
+                    <button
+                      type="button"
+                      className="has-cinema-clear-history-btn"
+                      onClick={handleClearHistory}
+                      data-tv-focusable="true"
+                    >
+                      🗑 Очистить историю
+                    </button>
+                  )}
+                </div>
+
+                {cinemaState.history.length === 0 ? (
+                  <div className="has-cinema-empty-bookmarks">
+                    <span style={{ fontSize: 32 }}>🕒</span>
+                    <span style={{ fontSize: 16, fontWeight: 600 }}>В истории пока ничего нет</span>
+                    <span className="has-cinema-empty-sub">
+                      Фильмы и серии, которые вы начнёте смотреть, будут автоматически сохраняться здесь с точным прогрессом.
+                    </span>
+                    <button
+                      type="button"
+                      className="has-cinema-btn-primary"
+                      style={{ marginTop: 14, width: "fit-content", alignSelf: "center", padding: "8px 24px" }}
+                      onClick={() => setActiveTab("home")}
+                      data-tv-focusable="true"
+                    >
+                      🎬 Перейти в каталог
+                    </button>
+                  </div>
+                ) : (
+                  <div className="has-cinema-grid-cards">
+                    {cinemaState.history.map((h, i) => {
+                      const percent =
+                        h.duration_seconds > 0
+                          ? Math.min(100, Math.round((h.progress_seconds / h.duration_seconds) * 100))
+                          : 0;
+                      const remainingSecs = Math.max(0, h.duration_seconds - h.progress_seconds);
+                      const remainingMins = Math.round(remainingSecs / 60);
+
+                      return (
+                        <div
+                          key={`${h.title_id}-${h.season}-${h.episode}-${i}`}
+                          className="has-cinema-grid-card has-cinema-history-card"
+                          onClick={() => handlePlayHistoryItem(h)}
+                          data-tv-focusable="true"
+                          tabIndex={0}
+                          role="button"
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " " || e.keyCode === 23 || e.keyCode === 66) {
+                              e.preventDefault();
+                              handlePlayHistoryItem(h);
+                            }
+                          }}
+                        >
+                          <div className="has-cinema-media-thumb-box">
+                            <img
+                              src={h.poster_path || h.backdrop_path || INITIAL_LIBRARY[0].poster_url}
+                              alt={h.title_name}
+                              className="has-cinema-media-thumb"
+                              loading="lazy"
+                            />
+
+                            <div className={`has-cinema-history-status-badge ${percent >= 90 ? "completed" : ""}`}>
+                              {percent >= 90 ? "✓ Просмотрено" : `~${remainingMins} мин`}
+                            </div>
+
+                            <button
+                              type="button"
+                              className="has-cinema-history-item-del-btn"
+                              onClick={(e) => handleRemoveHistoryItem(e, h)}
+                              title="Удалить из истории"
+                              aria-label="Удалить из истории"
+                            >
+                              ✕
+                            </button>
+
+                            <div className="has-cinema-media-play-overlay">
+                              <div className="has-cinema-media-play-circle">▶</div>
+                            </div>
+
+                            <div className="has-cinema-ep-progress-bar">
+                              <div
+                                className="has-cinema-ep-progress-fill"
+                                style={{ width: `${percent}%` }}
+                              />
+                            </div>
+                            <span className="has-cinema-history-percent-badge">{percent}%</span>
+                          </div>
+
+                          <div className="has-cinema-media-meta">
+                            <span className="has-cinema-media-title">{h.title_name}</span>
+                            <div className="has-cinema-history-card-sub">
+                              <span className="has-cinema-history-ep-info">
+                                {h.season > 0 ? `Сезон ${h.season}, Серия ${h.episode}` : "Фильм"}
+                              </span>
+                              {h.last_watched && (
+                                <span className="has-cinema-history-date">
+                                  {formatHistoryDate(h.last_watched)}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -4120,6 +4351,27 @@ export default function Cinema({
                 data-tv-focusable="true"
               >
                 🛡️ {isAdBlockEnabled ? "Без рекламы" : "Реклама: Вкл"}
+              </button>
+
+              {/* Quick Skip Ad / Intro Pill */}
+              <button
+                type="button"
+                className="has-cinema-player-hud-btn ad-skip-pill"
+                onClick={() => {
+                  if (videoRef.current) {
+                    videoRef.current.currentTime = Math.min(
+                      videoRef.current.duration || 999999,
+                      videoRef.current.currentTime + 20
+                    );
+                  }
+                  showTvToast("Пропуск рекламы (+20 сек)", "⏩", 1500);
+                  playTvSelectBeep();
+                  resetHudTimer();
+                }}
+                title="Пропустить рекламу казино или вступительную заставку (+20 сек)"
+                data-tv-focusable="true"
+              >
+                ⏩ Пропуск (+20с)
               </button>
 
               {/* Single Settings button (Contains voiceover studios & mirrors) */}

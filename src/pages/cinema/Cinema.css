@@ -800,6 +800,28 @@
   transform: scale(1.05);
 }
 
+/* Quick Ad / Intro Skip Button */
+.has-cinema-player-hud-btn.ad-skip-pill {
+  font-size: 12px;
+  padding: 7px 13px;
+  border-radius: 9999px;
+  background: rgba(245, 158, 11, 0.15);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  color: #fde68a;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.has-cinema-player-hud-btn.ad-skip-pill:hover,
+.has-cinema-player-hud-btn.ad-skip-pill:focus-visible,
+.has-cinema-player-hud-btn.ad-skip-pill[data-tv-focused="true"] {
+  background: rgba(245, 158, 11, 0.35) !important;
+  border-color: #f59e0b !important;
+  color: #ffffff !important;
+  outline: 3px solid #f59e0b !important;
+  box-shadow: 0 0 20px rgba(245, 158, 11, 0.8) !important;
+  transform: scale(1.05);
+}
+
 /* Server selector pills in top HUD */
 .has-cinema-player-hud-servers {
   display: flex;
@@ -3118,6 +3140,177 @@
     width: 100%;
   }
 }
+
+/* ========================================================
+   WATCH HISTORY (ИСТОРИЯ ПРОСМОТРОВ) STYLES
+   ======================================================== */
+.has-cinema-history-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.has-cinema-history-subtitle {
+  color: #94a3b8;
+  font-size: 13.5px;
+  font-weight: 400;
+  margin-top: 4px;
+  display: block;
+}
+
+.has-cinema-clear-history-btn {
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.28);
+  color: #fca5a5;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 8px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.has-cinema-clear-history-btn:hover,
+.has-cinema-clear-history-btn:focus-visible,
+.has-tv-mode .has-cinema-clear-history-btn:focus {
+  background: rgba(239, 68, 68, 0.25) !important;
+  border-color: #ef4444 !important;
+  color: #fff !important;
+  outline: 2px solid #ef4444 !important;
+  outline-offset: 2px !important;
+  transform: translateY(-1px);
+}
+
+.has-cinema-row-more-btn {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #cbd5e1;
+  font-size: 12.5px;
+  font-weight: 500;
+  padding: 6px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.has-cinema-row-more-btn:hover,
+.has-cinema-row-more-btn:focus-visible,
+.has-tv-mode .has-cinema-row-more-btn:focus {
+  background: rgba(99, 102, 241, 0.25) !important;
+  border-color: #818cf8 !important;
+  color: #fff !important;
+  outline: 2px solid #818cf8 !important;
+  outline-offset: 2px !important;
+}
+
+/* History Card Enhancements */
+.has-cinema-history-card {
+  position: relative;
+}
+
+.has-cinema-history-item-del-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: rgba(15, 23, 42, 0.75);
+  backdrop-filter: blur(6px);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  color: #cbd5e1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  opacity: 0;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  z-index: 25;
+}
+
+.has-cinema-media-card:hover .has-cinema-history-item-del-btn,
+.has-cinema-grid-card:hover .has-cinema-history-item-del-btn,
+.has-cinema-media-card:focus-within .has-cinema-history-item-del-btn,
+.has-cinema-grid-card:focus-within .has-cinema-history-item-del-btn,
+.has-tv-mode .has-cinema-media-card:focus .has-cinema-history-item-del-btn,
+.has-tv-mode .has-cinema-grid-card:focus .has-cinema-history-item-del-btn {
+  opacity: 1;
+}
+
+.has-cinema-history-item-del-btn:hover,
+.has-cinema-history-item-del-btn:focus-visible {
+  background: #ef4444;
+  color: #fff;
+  border-color: #ef4444;
+  transform: scale(1.15);
+  outline: none;
+}
+
+.has-cinema-history-status-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(6px);
+  border: 1px solid rgba(129, 140, 248, 0.35);
+  color: #c7d2fe;
+  font-size: 11px;
+  font-weight: 600;
+  z-index: 10;
+}
+
+.has-cinema-history-status-badge.completed {
+  background: rgba(6, 78, 59, 0.85);
+  border-color: rgba(52, 211, 153, 0.4);
+  color: #6ee7b7;
+}
+
+.has-cinema-history-percent-badge {
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(4px);
+  color: #e2e8f0;
+  font-size: 10.5px;
+  font-weight: 600;
+  z-index: 10;
+}
+
+.has-cinema-history-card-sub {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: #94a3b8;
+  margin-top: 2px;
+}
+
+.has-cinema-history-ep-info {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.has-cinema-history-date {
+  color: #64748b;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
 
 
 

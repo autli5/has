@@ -253,6 +253,53 @@ pub async fn update_cinema_progress(
 }
 
 #[tauri::command]
+pub async fn remove_cinema_history_item(
+    app: AppHandle,
+    title_id: String,
+    season: u32,
+    episode: u32,
+    user_email: Option<String>,
+) -> Result<CinemaState, String> {
+    let mut state = read_local_cinema_state(&app);
+    state.history.retain(|h| !(h.title_id == title_id && h.season == season && h.episode == episode));
+    let _ = write_local_cinema_state(&app, &state);
+
+    if let Some(email) = user_email {
+        let email_clean = email.trim().to_lowercase();
+        if !email_clean.is_empty() {
+            let state_to_save = state.clone();
+            tokio::spawn(async move {
+                let _ = save_remote_cinema_state(&email_clean, &state_to_save).await;
+            });
+        }
+    }
+
+    Ok(state)
+}
+
+#[tauri::command]
+pub async fn clear_cinema_history(
+    app: AppHandle,
+    user_email: Option<String>,
+) -> Result<CinemaState, String> {
+    let mut state = read_local_cinema_state(&app);
+    state.history.clear();
+    let _ = write_local_cinema_state(&app, &state);
+
+    if let Some(email) = user_email {
+        let email_clean = email.trim().to_lowercase();
+        if !email_clean.is_empty() {
+            let state_to_save = state.clone();
+            tokio::spawn(async move {
+                let _ = save_remote_cinema_state(&email_clean, &state_to_save).await;
+            });
+        }
+    }
+
+    Ok(state)
+}
+
+#[tauri::command]
 pub async fn toggle_cinema_bookmark(
     app: AppHandle,
     title_id: String,

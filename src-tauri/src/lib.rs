@@ -249,6 +249,8 @@ pub fn run() {
             cinema::get_cinema_state,
             cinema::save_cinema_state,
             cinema::update_cinema_progress,
+            cinema::remove_cinema_history_item,
+            cinema::clear_cinema_history,
             cinema::toggle_cinema_bookmark,
             cinema::tmdb_query,
             cinema::get_russian_media_info,
