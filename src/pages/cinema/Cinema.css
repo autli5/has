@@ -769,6 +769,37 @@
   color: #ffffff;
 }
 
+/* AdBlock Guard pill */
+.has-cinema-player-hud-btn.adblock-pill {
+  font-size: 12px;
+  padding: 7px 13px;
+  border-radius: 9999px;
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  color: #a7f3d0;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.has-cinema-player-hud-btn.adblock-pill:hover {
+  background: rgba(16, 185, 129, 0.25);
+  border-color: #34d399;
+  color: #ffffff;
+}
+
+.has-cinema-player-hud-btn.adblock-pill.active {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.35), rgba(5, 150, 105, 0.5));
+  border-color: #10b981;
+  color: #ffffff;
+  box-shadow: 0 0 16px rgba(16, 185, 129, 0.55);
+}
+
+.has-cinema-player-hud-btn.adblock-pill:focus-visible,
+.has-cinema-player-hud-btn.adblock-pill[data-tv-focused="true"] {
+  outline: 3px solid #10b981 !important;
+  box-shadow: 0 0 25px rgba(16, 185, 129, 0.85) !important;
+  transform: scale(1.05);
+}
+
 /* Server selector pills in top HUD */
 .has-cinema-player-hud-servers {
   display: flex;

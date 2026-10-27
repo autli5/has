@@ -618,6 +618,7 @@ export default function Cinema({
   const [currentKpId, setCurrentKpId] = useState<number | null>(null);
   const [currentImdbId, setCurrentImdbId] = useState<string | null>(null);
   const [currentAllohaUrl, setCurrentAllohaUrl] = useState<string | null>(null);
+  const [isAdBlockEnabled, setIsAdBlockEnabled] = useState<boolean>(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [kodikResults, setKodikResults] = useState<KodikItem[]>([]);
   const [selectedKodikLink, setSelectedKodikLink] = useState<string | null>(null);
@@ -3728,6 +3729,27 @@ export default function Cinema({
                 🔄 Сменить источник
               </button>
 
+              {/* AdBlock Guard toggle */}
+              <button
+                type="button"
+                className={`has-cinema-player-hud-btn adblock-pill ${isAdBlockEnabled ? "active" : ""}`}
+                onClick={() => {
+                  setIsAdBlockEnabled((prev) => !prev);
+                  showTvToast(
+                    !isAdBlockEnabled
+                      ? "🛡️ Блокировка рекламы и казино ВКЛ"
+                      : "⚠️ Блокировка рекламы ВЫКЛ",
+                    "🛡️",
+                    1800
+                  );
+                  resetHudTimer();
+                }}
+                title={isAdBlockEnabled ? "Блокировщик рекламы активен (всплывающие окна и казино заблокированы)" : "Включить блокировку рекламы"}
+                data-tv-focusable="true"
+              >
+                🛡️ {isAdBlockEnabled ? "Без рекламы" : "Реклама: Вкл"}
+              </button>
+
               {/* Single Settings button (Contains voiceover studios & mirrors) */}
               <button
                 type="button"
@@ -3842,10 +3864,15 @@ export default function Cinema({
               )
             ) : playerMode === "balancer" ? (
               <iframe
-                key={`${selectedMirror}-${balancerEmbedUrl}`}
+                key={`${selectedMirror}-${balancerEmbedUrl}-${isAdBlockEnabled}`}
                 src={balancerEmbedUrl}
                 title={(playingMedia || selectedMedia).title}
                 className="has-cinema-iframe-elem"
+                sandbox={
+                  isAdBlockEnabled
+                    ? "allow-scripts allow-same-origin allow-forms allow-presentation"
+                    : undefined
+                }
                 allow="autoplay *; fullscreen *; encrypted-media *; picture-in-picture *; clipboard-write *"
                 referrerPolicy="no-referrer-when-downgrade"
                 allowFullScreen
@@ -4048,6 +4075,31 @@ export default function Cinema({
                         🌐 AutoEmbed
                       </button>
                     </div>
+                  </div>
+
+                  {/* AdBlock Guard Section */}
+                  <div className="has-cinema-drawer-section">
+                    <h4 className="has-cinema-drawer-section-title">
+                      🛡️ Блокировка рекламы и всплывающих окон
+                    </h4>
+                    <button
+                      type="button"
+                      className={`has-cinema-drawer-option-btn ${isAdBlockEnabled ? "active" : ""}`}
+                      onClick={() => {
+                        setIsAdBlockEnabled((prev) => !prev);
+                        showTvToast(!isAdBlockEnabled ? "🛡️ Защита от рекламы ВКЛ" : "⚠️ Защита от рекламы ВЫКЛ", "🛡️", 2000);
+                      }}
+                      data-tv-focusable="true"
+                    >
+                      <span className="option-name">
+                        {isAdBlockEnabled ? "🛡️ Блокировщик рекламы: ВКЛЮЧЕН" : "⚠️ Блокировщик рекламы: ВЫКЛЮЧЕН"}
+                      </span>
+                      <span className="option-desc">
+                        {isAdBlockEnabled
+                          ? "Защита активна: блокируются всплывающие окна, казино 1xBet, редиректы и баннеры"
+                          : "Защита отключена: разрешены все всплывающие окна балансера"}
+                      </span>
+                    </button>
                   </div>
 
                   {/* External Tools */}

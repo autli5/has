@@ -7,6 +7,46 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <title>has</title>
+    <!-- HAS Cinema AdGuard & Anti-Popup Shield -->
+    <script>
+      (function() {
+        try {
+          const fakeWindow = {
+            closed: true,
+            close: function() {},
+            focus: function() {},
+            blur: function() {},
+            postMessage: function() {},
+            location: { href: "about:blank" }
+          };
+          window.open = function(url) {
+            console.warn("[HAS AdGuard] Blocked unauthorized window.open:", url);
+            return fakeWindow;
+          };
+        } catch (_) {}
+
+        const AD_PATTERNS = [
+          /1xbet/i, /vavada/i, /mostbet/i, /pin-up/i, /bet365/i, /casino/i,
+          /adsterra/i, /propellerads/i, /popcash/i, /monetag/i, /clickadu/i,
+          /exoclick/i, /juicyads/i, /adcash/i, /trafficjunky/i, /syndication/i,
+          /delivembd/i, /betandyou/i, /melbet/i, /linebet/i, /fonbet/i, /parimatch/i
+        ];
+
+        document.addEventListener("click", function(e) {
+          const a = e.target && e.target.closest ? e.target.closest("a") : null;
+          if (a && a.href) {
+            for (let i = 0; i < AD_PATTERNS.length; i++) {
+              if (AD_PATTERNS[i].test(a.href)) {
+                e.preventDefault();
+                e.stopPropagation();
+                console.warn("[HAS AdGuard] Intercepted ad redirect:", a.href);
+                return;
+              }
+            }
+          }
+        }, true);
+      })();
+    </script>
   </head>
 
   <body>
