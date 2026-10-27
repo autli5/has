@@ -2017,21 +2017,22 @@
 }
 
 /* Android TV Leanback Navigation Drawer (Slide-in Overlay) */
+/* Android TV Leanback Navigation Drawer (Zona / Android TV 10-Foot UI) */
 .has-cinema-tv-nav-drawer {
   position: fixed;
   top: 0;
   left: 0;
   bottom: 0;
-  width: 270px;
-  background: rgba(8, 12, 24, 0.97);
+  width: 280px;
+  background: rgba(8, 12, 24, 0.98);
   backdrop-filter: blur(28px);
   border-right: 1px solid rgba(129, 140, 248, 0.35);
-  box-shadow: 15px 0 50px rgba(0, 0, 0, 0.9);
+  box-shadow: 20px 0 60px rgba(0, 0, 0, 0.95);
   display: flex;
   flex-direction: column;
   z-index: 2000;
   transform: translateX(-100%);
-  transition: transform 0.26s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
   pointer-events: none;
   visibility: hidden;
 }
@@ -2045,63 +2046,40 @@
 .has-cinema-tv-nav-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 18px 16px 14px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  justify-content: flex-start;
+  padding: 24px 20px 18px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .has-cinema-tv-nav-logo {
   display: flex;
   align-items: center;
-  gap: 10px;
-  overflow: hidden;
+  gap: 12px;
 }
 
 .has-cinema-tv-nav-logo-badge {
   background: linear-gradient(135deg, #6366f1, #a855f7);
   color: #fff;
-  font-weight: 800;
-  font-size: 13px;
-  padding: 4px 8px;
+  font-weight: 900;
+  font-size: 14px;
+  padding: 5px 10px;
   border-radius: 8px;
-  letter-spacing: 1px;
+  letter-spacing: 1.5px;
+  box-shadow: 0 0 16px rgba(99, 102, 241, 0.5);
 }
 
 .has-cinema-tv-nav-logo-text {
-  font-size: 16px;
-  font-weight: 700;
+  font-size: 18px;
+  font-weight: 800;
   color: #f8fafc;
-  white-space: nowrap;
-}
-
-.has-cinema-tv-nav-toggle-btn {
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 8px;
-  color: #cbd5e1;
-  width: 32px;
-  height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  font-size: 12px;
-}
-
-.has-cinema-tv-nav-toggle-btn:focus,
-.has-cinema-tv-nav-toggle-btn:hover {
-  background: #6366f1;
-  color: #ffffff;
-  outline: 3px solid #818cf8 !important;
-  box-shadow: 0 0 16px rgba(129, 140, 248, 0.7) !important;
+  letter-spacing: 0.5px;
 }
 
 .has-cinema-tv-nav-list {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 12px 10px;
+  padding: 16px 12px;
   flex: 1;
   overflow-y: auto;
 }
@@ -2111,12 +2089,12 @@
   display: flex;
   align-items: center;
   gap: 14px;
-  padding: 12px 14px;
+  padding: 12px 16px;
   background: transparent;
   border: 1px solid transparent;
   border-radius: 12px;
   color: #94a3b8;
-  font-size: 15px;
+  font-size: 15.5px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
@@ -2125,18 +2103,19 @@
 
 .has-cinema-tv-nav-item:hover,
 .has-cinema-tv-nav-item:focus {
-  background: rgba(99, 102, 241, 0.25) !important;
+  background: rgba(99, 102, 241, 0.3) !important;
   border-color: #818cf8 !important;
   color: #ffffff !important;
   outline: 3px solid #818cf8 !important;
-  box-shadow: 0 0 24px rgba(129, 140, 248, 0.8) !important;
-  transform: scale(1.04) !important;
+  box-shadow: 0 0 24px rgba(129, 140, 248, 0.85) !important;
+  transform: scale(1.03) !important;
 }
 
 .has-cinema-tv-nav-item.active {
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.35), rgba(139, 92, 246, 0.35));
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.4), rgba(139, 92, 246, 0.4));
   border-color: rgba(129, 140, 248, 0.6);
   color: #ffffff;
+  font-weight: 700;
 }
 
 .has-cinema-tv-nav-item.logout {
@@ -2168,34 +2147,98 @@
 }
 
 .has-cinema-tv-nav-footer {
-  padding: 12px;
-  font-size: 11.5px;
+  padding: 14px 16px;
+  font-size: 12px;
   color: #64748b;
   text-align: center;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-/* TV Mode Root Overrides (Safe Overscan Area & Compact Proportions) */
+/* TV Mode Root Overrides (Zona TV & Android TV Experience) */
 .has-tv-mode {
   font-size: 14.5px;
 }
 
+/* Navigation is completely invisible on cinema screen (summoned by pressing Left from edge) */
 .has-tv-mode .has-cinema-header {
-  padding: 16px 54px !important;
-}
-
-.has-tv-mode .has-cinema-nav-links {
-  gap: 20px;
-}
-
-.has-tv-mode .has-cinema-nav-item {
-  font-size: 15px;
-  padding: 6px 10px;
+  display: none !important;
 }
 
 .has-tv-mode .has-cinema-hero {
-  padding: 85px 54px 30px !important;
+  padding: 40px 54px 30px !important;
   min-height: 360px;
+}
+
+/* Dedicated TV Search Section when activeTab === "search" */
+.has-cinema-tv-search-page {
+  padding: 40px 54px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.has-cinema-tv-search-box-wrap {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: rgba(15, 23, 42, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 16px;
+  padding: 14px 22px;
+  backdrop-filter: blur(16px);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.has-cinema-tv-search-box-wrap:focus-within {
+  border-color: #818cf8;
+  box-shadow: 0 0 25px rgba(129, 140, 248, 0.6);
+}
+
+.has-cinema-tv-search-lens {
+  font-size: 22px;
+}
+
+.has-cinema-tv-search-input-field {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #ffffff;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.has-cinema-tv-search-input-field::placeholder {
+  color: #64748b;
+}
+
+.has-cinema-tv-search-clear-btn {
+  background: rgba(255, 255, 255, 0.1);
+  border: none;
+  color: #94a3b8;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.has-cinema-tv-search-clear-btn:hover,
+.has-cinema-tv-search-clear-btn:focus {
+  background: #ef4444;
+  color: #ffffff;
+  outline: 2px solid #ffffff;
+}
+
+.has-cinema-tv-search-hint {
+  font-size: 13.5px;
+  color: #94a3b8;
+  padding-left: 6px;
 }
 
 .has-tv-mode .has-cinema-hero-title {

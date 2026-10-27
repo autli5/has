@@ -594,7 +594,7 @@ export default function Cinema({
   const [, setConfig] = useState<CinemaConfig>({ tmdb_api_key: null });
 
   // Navigation Filter
-  const [activeTab, setActiveTab] = useState<"home" | "movies" | "series" | "anime" | "bookmarks">("home");
+  const [activeTab, setActiveTab] = useState<"home" | "movies" | "series" | "anime" | "bookmarks" | "search">("home");
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<CinemaMediaItem[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -1764,7 +1764,19 @@ export default function Cinema({
         if (isTvNavOpen) {
           e.preventDefault();
           setIsTvNavOpen(false);
-          focusFirstContentCard();
+          setTimeout(() => {
+            if (lastFocusedCardRef.current && document.contains(lastFocusedCardRef.current)) {
+              lastFocusedCardRef.current.focus();
+              lastFocusedCardRef.current.scrollIntoView({
+                behavior: "smooth",
+                block: "center",
+                inline: "center",
+              });
+              playTvBeep(640, 0.03);
+            } else {
+              focusFirstContentCard();
+            }
+          }, 40);
           return;
         }
         if (showTrailerModal) {
@@ -1805,6 +1817,22 @@ export default function Cinema({
           showTvToast("Каталог", "🏠", 1200);
           playTvBeep(450, 0.04);
           focusFirstContentCard();
+          return;
+        }
+        // At home root on TV, Back button summons the navigation drawer
+        if (isTvMode && !isTvNavOpen) {
+          e.preventDefault();
+          lastFocusedCardRef.current = document.activeElement as HTMLElement | null;
+          setIsTvNavOpen(true);
+          setTimeout(() => {
+            const targetNav =
+              document.querySelector<HTMLElement>(".has-cinema-tv-nav-item.active") ||
+              document.querySelector<HTMLElement>(".has-cinema-tv-nav-item");
+            if (targetNav) {
+              targetNav.focus();
+              playTvBeep(640, 0.03);
+            }
+          }, 40);
           return;
         }
       }
@@ -1853,14 +1881,26 @@ export default function Cinema({
           if (direction === "right") {
             e.preventDefault();
             setIsTvNavOpen(false);
-            focusFirstContentCard();
+            setTimeout(() => {
+              if (lastFocusedCardRef.current && document.contains(lastFocusedCardRef.current)) {
+                lastFocusedCardRef.current.focus();
+                lastFocusedCardRef.current.scrollIntoView({
+                  behavior: "smooth",
+                  block: "center",
+                  inline: "center",
+                });
+                playTvBeep(640, 0.03);
+              } else {
+                focusFirstContentCard();
+              }
+            }, 40);
             return;
           }
         }
 
         let focusables = Array.from(
           document.querySelectorAll<HTMLElement>(
-            '[data-tv-focusable="true"], .has-cinema-nav-item, .has-cinema-tv-nav-item, .has-cinema-tv-menu-pill, .has-cinema-btn-play, .has-cinema-btn-bookmark, .has-cinema-search-input, .has-cinema-media-card, .has-cinema-grid-card, .has-cinema-episode-card, .has-cinema-player-hud-btn, .has-cinema-player-btn-back, .has-cinema-drawer-option-btn, .has-cinema-drawer-chip, .has-cinema-drawer-ep-btn, .has-cinema-drawer-close-btn, .has-cinema-drawer-btn-primary, .has-cinema-drawer-btn-secondary, .has-cinema-player-pill-nav, .has-cinema-season-tab, .has-cinema-details-btn-play, .has-cinema-details-close-btn, .has-cinema-details-btn-bookmark, .has-cinema-details-btn-trailer, .has-cinema-actor-card, .has-cinema-btn-info-wide'
+            '[data-tv-focusable="true"], .has-cinema-nav-item, .has-cinema-tv-nav-item, .has-cinema-btn-play, .has-cinema-btn-bookmark, .has-cinema-media-card, .has-cinema-grid-card, .has-cinema-episode-card, .has-cinema-player-hud-btn, .has-cinema-player-btn-back, .has-cinema-drawer-option-btn, .has-cinema-drawer-chip, .has-cinema-drawer-ep-btn, .has-cinema-drawer-close-btn, .has-cinema-drawer-btn-primary, .has-cinema-drawer-btn-secondary, .has-cinema-player-pill-nav, .has-cinema-season-tab, .has-cinema-details-btn-play, .has-cinema-details-close-btn, .has-cinema-details-btn-bookmark, .has-cinema-details-btn-trailer, .has-cinema-actor-card, .has-cinema-btn-info-wide'
           )
         ).filter((el) => {
           const r = el.getBoundingClientRect();
@@ -1872,6 +1912,22 @@ export default function Cinema({
             style.opacity !== "0"
           );
         });
+
+        // TV navigation drawer focus isolation
+        if (isTvNavOpen) {
+          const drawerEl = document.querySelector<HTMLElement>(".has-cinema-tv-nav-drawer");
+          if (drawerEl) {
+            focusables = focusables.filter((el) => drawerEl.contains(el));
+          }
+        } else {
+          // When drawer is closed, NEVER include drawer items in focusable pool
+          focusables = focusables.filter((el) => !el.closest(".has-cinema-tv-nav-drawer"));
+        }
+
+        // In TV mode, top header is hidden, so never include header elements
+        if (isTvMode) {
+          focusables = focusables.filter((el) => !el.closest(".has-cinema-header"));
+        }
 
         // Trap focus inside modal or drawer if open
         if (settingsSheet) {
@@ -1952,10 +2008,11 @@ export default function Cinema({
           playTvBeep(640, 0.025);
         } else {
           // If no element found in this direction outside modals:
-          // Trigger the TV Navigation Drawer on Left (from leftmost card) or Right (from rightmost edge)
+          // When moving LEFT from the leftmost card, summon the TV Navigation Drawer!
           if (!detailsEl && !playerEl && !trailerEl && !settingsSheet && !episodesSheet) {
-            if (direction === "left" || direction === "right") {
+            if (direction === "left") {
               e.preventDefault();
+              lastFocusedCardRef.current = current;
               setIsTvNavOpen(true);
               setTimeout(() => {
                 const targetNav =
@@ -2276,46 +2333,38 @@ export default function Cinema({
       )}
 
       {/* ========================================================
-          ANDROID TV LEANBACK NAVIGATION DRAWER
-          (Opens when pressing Left from cards, remote Menu, or Menu pill)
+          ANDROID TV LEANBACK NAVIGATION DRAWER (Zona TV Experience)
+          (Summoned only by moving Left from the leftmost card)
           ======================================================== */}
       {isTvMode && (
         <aside
-          className={`has-cinema-tv-nav-drawer ${isTvNavOpen ? "open" : "collapsed"}`}
+          className={`has-cinema-tv-nav-drawer ${isTvNavOpen ? "open" : ""}`}
           aria-label="Навигация для ТВ"
         >
           <div className="has-cinema-tv-nav-header">
             <div className="has-cinema-tv-nav-logo">
               <span className="has-cinema-tv-nav-logo-badge">HAS</span>
-              {isTvNavOpen && <span className="has-cinema-tv-nav-logo-text">Кинотеатр</span>}
+              <span className="has-cinema-tv-nav-logo-text">Кинотеатр</span>
             </div>
-            <button
-              type="button"
-              className="has-cinema-tv-nav-toggle-btn"
-              onClick={() => setIsTvNavOpen((prev) => !prev)}
-              title={isTvNavOpen ? "Свернуть меню (Вправо)" : "Развернуть меню"}
-              data-tv-focusable="true"
-            >
-              {isTvNavOpen ? "◀" : "▶"}
-            </button>
           </div>
 
           <div className="has-cinema-tv-nav-list">
             <button
               type="button"
-              className={`has-cinema-tv-nav-item ${searchQuery ? "active" : ""}`}
+              className={`has-cinema-tv-nav-item ${activeTab === "search" || searchQuery ? "active" : ""}`}
               onClick={() => {
+                setActiveTab("search");
                 setIsTvNavOpen(false);
-                const searchInput = document.querySelector<HTMLInputElement>(".has-cinema-search-input");
-                if (searchInput) {
-                  searchInput.focus();
-                }
+                setTimeout(() => {
+                  const s = document.querySelector<HTMLInputElement>(".has-cinema-tv-search-input-field") || document.querySelector<HTMLInputElement>(".has-cinema-search-input");
+                  if (s) s.focus();
+                }, 60);
               }}
               data-tv-focusable="true"
               title="Поиск"
             >
               <span className="has-cinema-tv-nav-icon">🔍</span>
-              {isTvNavOpen && <span className="has-cinema-tv-nav-label">Поиск</span>}
+              <span className="has-cinema-tv-nav-label">Поиск</span>
             </button>
 
             <button
@@ -2325,13 +2374,13 @@ export default function Cinema({
                 setActiveTab("home");
                 setSearchQuery("");
                 setIsTvNavOpen(false);
-                focusFirstContentCard();
+                setTimeout(() => focusFirstContentCard(), 60);
               }}
               data-tv-focusable="true"
               title="Каталог"
             >
-              <span className="has-cinema-tv-nav-icon">🎬</span>
-              {isTvNavOpen && <span className="has-cinema-tv-nav-label">Каталог</span>}
+              <span className="has-cinema-tv-nav-icon">🏠</span>
+              <span className="has-cinema-tv-nav-label">Каталог</span>
             </button>
 
             <button
@@ -2341,13 +2390,13 @@ export default function Cinema({
                 setActiveTab("movies");
                 setSearchQuery("");
                 setIsTvNavOpen(false);
-                focusFirstContentCard();
+                setTimeout(() => focusFirstContentCard(), 60);
               }}
               data-tv-focusable="true"
               title="Фильмы"
             >
-              <span className="has-cinema-tv-nav-icon">🍿</span>
-              {isTvNavOpen && <span className="has-cinema-tv-nav-label">Фильмы</span>}
+              <span className="has-cinema-tv-nav-icon">🎬</span>
+              <span className="has-cinema-tv-nav-label">Фильмы</span>
             </button>
 
             <button
@@ -2357,13 +2406,13 @@ export default function Cinema({
                 setActiveTab("series");
                 setSearchQuery("");
                 setIsTvNavOpen(false);
-                focusFirstContentCard();
+                setTimeout(() => focusFirstContentCard(), 60);
               }}
               data-tv-focusable="true"
               title="Сериалы"
             >
               <span className="has-cinema-tv-nav-icon">📺</span>
-              {isTvNavOpen && <span className="has-cinema-tv-nav-label">Сериалы</span>}
+              <span className="has-cinema-tv-nav-label">Сериалы</span>
             </button>
 
             <button
@@ -2373,13 +2422,13 @@ export default function Cinema({
                 setActiveTab("anime");
                 setSearchQuery("");
                 setIsTvNavOpen(false);
-                focusFirstContentCard();
+                setTimeout(() => focusFirstContentCard(), 60);
               }}
               data-tv-focusable="true"
               title="Аниме"
             >
-              <span className="has-cinema-tv-nav-icon">⛩️</span>
-              {isTvNavOpen && <span className="has-cinema-tv-nav-label">Аниме</span>}
+              <span className="has-cinema-tv-nav-icon">🌸</span>
+              <span className="has-cinema-tv-nav-label">Аниме</span>
             </button>
 
             <button
@@ -2389,17 +2438,15 @@ export default function Cinema({
                 setActiveTab("bookmarks");
                 setSearchQuery("");
                 setIsTvNavOpen(false);
-                focusFirstContentCard();
+                setTimeout(() => focusFirstContentCard(), 60);
               }}
               data-tv-focusable="true"
               title="Мой список"
             >
               <span className="has-cinema-tv-nav-icon">⭐</span>
-              {isTvNavOpen && (
-                <span className="has-cinema-tv-nav-label">
-                  Мой список {cinemaState.bookmarks.length > 0 && `(${cinemaState.bookmarks.length})`}
-                </span>
-              )}
+              <span className="has-cinema-tv-nav-label">
+                Мой список {cinemaState.bookmarks.length > 0 && `(${cinemaState.bookmarks.length})`}
+              </span>
             </button>
 
             {onNavigateTab && (
@@ -2414,7 +2461,7 @@ export default function Cinema({
                 title="Панель сервера"
               >
                 <span className="has-cinema-tv-nav-icon">🖥️</span>
-                {isTvNavOpen && <span className="has-cinema-tv-nav-label">Панель сервера</span>}
+                <span className="has-cinema-tv-nav-label">Панель сервера</span>
               </button>
             )}
 
@@ -2430,21 +2477,19 @@ export default function Cinema({
                 title="Выйти"
               >
                 <span className="has-cinema-tv-nav-icon">🚪</span>
-                {isTvNavOpen && <span className="has-cinema-tv-nav-label">Выйти</span>}
+                <span className="has-cinema-tv-nav-label">Выйти</span>
               </button>
             )}
           </div>
 
-          {isTvNavOpen && (
-            <div className="has-cinema-tv-nav-footer">
-              <span>▶ Нажмите Вправо для перехода к фильмам</span>
-            </div>
-          )}
+          <div className="has-cinema-tv-nav-footer">
+            <span>▶ Вправо или Назад — закрыть меню</span>
+          </div>
         </aside>
       )}
 
       {/* ========================================================
-          1. TOP NAVIGATION BAR (All categories & search)
+          1. TOP NAVIGATION BAR (For Desktop / Mobile only; hidden in TV Mode)
           ======================================================== */}
       <header className="has-cinema-header">
         <nav className="has-cinema-nav-links">
@@ -2506,17 +2551,6 @@ export default function Cinema({
         </nav>
 
         <div className="has-cinema-header-right">
-          {isTvMode && (
-            <button
-              type="button"
-              className={`has-cinema-tv-menu-pill ${isTvNavOpen ? "active" : ""}`}
-              onClick={() => setIsTvNavOpen((prev) => !prev)}
-              title="Меню навигации (Пульт: ◀ или Влево)"
-              data-tv-focusable="true"
-            >
-              ☰ Разделы
-            </button>
-          )}
 
           {/* Universal Search Box */}
           <div className="has-cinema-search-wrapper">
@@ -2559,6 +2593,42 @@ export default function Cinema({
           </div>
         </div>
       </header>
+
+      {/* ========================================================
+          TV SEARCH VIEW (When activeTab === "search" in TV Mode)
+          ======================================================== */}
+      {isTvMode && activeTab === "search" && (
+        <section className="has-cinema-tv-search-page">
+          <div className="has-cinema-tv-search-box-wrap">
+            <span className="has-cinema-tv-search-lens">🔍</span>
+            <input
+              type="text"
+              className="has-cinema-tv-search-input-field"
+              placeholder="Введите название фильма, сериала или аниме..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              data-tv-focusable="true"
+              autoFocus
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                className="has-cinema-tv-search-clear-btn"
+                onClick={() => setSearchQuery("")}
+                data-tv-focusable="true"
+                title="Очистить"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+          {searchQuery.trim().length === 0 && (
+            <div className="has-cinema-tv-search-hint">
+              <span>💡 Введите название с клавиатуры или пульта. Нажмите Влево с края для вызова меню.</span>
+            </div>
+          )}
+        </section>
+      )}
 
       {/* ========================================================
           SEARCH RESULTS FULL GRID VIEW (When Searching)
