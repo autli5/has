@@ -464,14 +464,16 @@ interface RussianMediaInfo {
 }
 
 type BalancerMirror =
-  | "smotrim_ru"
-  | "embess_ru"
-  | "alloha_ru"
-  | "kodik_ru"
-  | "anilibria"
   | "vidlink_pro"
+  | "kodik_ru"
+  | "autoembed"
+  | "vidsrc_pm"
+  | "multiembed"
   | "vidsrc_to"
-  | "autoembed";
+  | "alloha_ru"
+  | "anilibria"
+  | "embess_ru"
+  | "smotrim_ru";
 
 
 
@@ -612,7 +614,7 @@ export default function Cinema({
   const [playingEpisode, setPlayingEpisode] = useState<CinemaEpisode | null>(null);
   const [playingSeasonNumber, setPlayingSeasonNumber] = useState<number>(1);
   const playerMode: "balancer" | "direct" = "balancer";
-  const [selectedMirror, setSelectedMirror] = useState<BalancerMirror>("embess_ru");
+  const [selectedMirror, setSelectedMirror] = useState<BalancerMirror>("vidlink_pro");
   const [currentKpId, setCurrentKpId] = useState<number | null>(null);
   const [currentImdbId, setCurrentImdbId] = useState<string | null>(null);
   const [currentAllohaUrl, setCurrentAllohaUrl] = useState<string | null>(null);
@@ -1280,13 +1282,20 @@ export default function Cinema({
     setCurrentImdbId(null);
     setCurrentAllohaUrl(null);
 
-    // Default to genuine Russian spoken voiceover (direct Embess Full HD stream):
+    // Default to verified reliable high-speed 1080p stream:
     if (isAnime) {
-      setSelectedMirror("kodik_ru");
-      showTvToast("🌸 Русская озвучка аниме", "🎙️", 1800);
+      if (anilibriaStreamUrl) {
+        setSelectedMirror("anilibria");
+      } else if (kodikResults.length > 0) {
+        setSelectedMirror("kodik_ru");
+      } else {
+        setSelectedMirror("vidlink_pro");
+      }
+      showTvToast("🌸 Сервер: Kodik (Аниме / Озвучка)", "🎙️", 1800);
     } else {
-      setSelectedMirror("embess_ru");
-      showTvToast("🇷🇺 Включен полный русский дубляж (1080p)", "🎙️", 1800);
+      // Default to VidLink Pro (ultra reliable, resolves all TMDB movies/series in 1080p)
+      setSelectedMirror("vidlink_pro");
+      showTvToast("⚡ Запущен Сервер 1 (Full HD 1080p)", "🎬", 1800);
     }
 
     // Resolve Kinopoisk ID & Russian media data asynchronously via Rust backend or web fetch
@@ -1464,11 +1473,18 @@ export default function Cinema({
     }
   };
 
-  // Quick 1-click mirror switcher if a CDN balancer fails or is blocked
+  // Quick 1-click multi-source switcher with automatic fallback
   const handleCycleMirror = () => {
-    const mirrors: BalancerMirror[] = ["embess_ru", "vidlink_pro", "vidsrc_to", "autoembed"];
-    if (kodikResults.length > 0) mirrors.push("kodik_ru");
+    const mirrors: BalancerMirror[] = [
+      "vidlink_pro",
+      "kodik_ru",
+      "autoembed",
+      "vidsrc_pm",
+      "multiembed",
+      "vidsrc_to",
+    ];
     if (currentAllohaUrl) mirrors.push("alloha_ru");
+    if (anilibriaStreamUrl) mirrors.push("anilibria");
 
     const currentIndex = mirrors.indexOf(selectedMirror);
     const nextIndex = (currentIndex + 1) % mirrors.length;
@@ -1476,16 +1492,18 @@ export default function Cinema({
     setSelectedMirror(nextMirror);
 
     const labels: Record<BalancerMirror, string> = {
-      embess_ru: "Embess (Дубляж 1080p)",
+      vidlink_pro: "Сервер 1: VidLink Pro (1080p)",
+      kodik_ru: "Сервер 2: Kodik (Студии дубляжа)",
+      autoembed: "Сервер 3: AutoEmbed",
+      vidsrc_pm: "Сервер 4: VidSrc Pro",
+      multiembed: "Сервер 5: MultiStream VIP",
+      vidsrc_to: "Сервер 6: VidSrc To",
+      alloha_ru: "Сервер 7: Alloha",
+      anilibria: "Сервер 8: AniLibria HLS",
+      embess_ru: "Embess",
       smotrim_ru: "Smotrim",
-      vidlink_pro: "VidLink Pro (Full HD)",
-      vidsrc_to: "VidSrc Pro",
-      autoembed: "AutoEmbed",
-      alloha_ru: "Alloha",
-      kodik_ru: "Kodik",
-      anilibria: "AniLibria",
     };
-    showTvToast(`Сервер: ${labels[nextMirror] || nextMirror}`, "🔄", 2000);
+    showTvToast(`Переключено на: ${labels[nextMirror] || nextMirror}`, "🔄", 2200);
     resetHudTimer();
   };
 
@@ -2173,26 +2191,7 @@ export default function Cinema({
     const imdbId = currentImdbId;
 
     switch (selectedMirror) {
-      case "smotrim_ru":
-      case "embess_ru":
-        if (kpId) {
-          return `https://api.embess.ws/embed/kp/${kpId}${isTv ? `?season=${sNum}&episode=${epNum}` : ""}`;
-        }
-        if (imdbId) {
-          return `https://api.embess.ws/embed/imdb/${imdbId}${isTv ? `?season=${sNum}&episode=${epNum}` : ""}`;
-        }
-        // If neither KP nor IMDb is known for Embess, route to VidLink Pro which natively resolves all TMDB IDs
-        return isTv
-          ? `https://vidlink.pro/tv/${tmdb || 693134}/${sNum}/${epNum}?primaryColor=6366f1`
-          : `https://vidlink.pro/movie/${tmdb || 693134}?primaryColor=6366f1`;
-
-      case "alloha_ru":
-        if (currentAllohaUrl) {
-          return currentAllohaUrl;
-        }
-        if (kpId) {
-          return `https://api.delivembd.ws/embed/kp/${kpId}${isTv ? `?season=${sNum}&episode=${epNum}` : ""}`;
-        }
+      case "vidlink_pro":
         return isTv
           ? `https://vidlink.pro/tv/${tmdb || 693134}/${sNum}/${epNum}?primaryColor=6366f1`
           : `https://vidlink.pro/movie/${tmdb || 693134}?primaryColor=6366f1`;
@@ -2201,32 +2200,49 @@ export default function Cinema({
         if (selectedKodikLink) {
           return selectedKodikLink.startsWith("//") ? `https:${selectedKodikLink}` : selectedKodikLink;
         }
-        if (kpId) {
-          return `https://api.embess.ws/embed/kp/${kpId}${isTv ? `?season=${sNum}&episode=${epNum}` : ""}`;
+        if (kodikResults.length > 0 && kodikResults[0]?.link) {
+          const l = kodikResults[0].link;
+          return l.startsWith("//") ? `https:${l}` : l;
         }
         return isTv
           ? `https://vidlink.pro/tv/${tmdb || 693134}/${sNum}/${epNum}?primaryColor=6366f1`
           : `https://vidlink.pro/movie/${tmdb || 693134}?primaryColor=6366f1`;
-
-      case "vidlink_pro":
-        return isTv
-          ? `https://vidlink.pro/tv/${tmdb || 693134}/${sNum}/${epNum}?primaryColor=6366f1`
-          : `https://vidlink.pro/movie/${tmdb || 693134}?primaryColor=6366f1`;
-
-      case "vidsrc_to":
-        return isTv
-          ? `https://vidsrc.to/embed/tv/${tmdb || 693134}/${sNum}/${epNum}`
-          : `https://vidsrc.to/embed/movie/${tmdb || 693134}`;
 
       case "autoembed":
         return isTv
           ? `https://player.autoembed.co/embed/tv/${tmdb || 693134}/${sNum}/${epNum}`
           : `https://player.autoembed.co/embed/movie/${tmdb || 693134}`;
 
-      default:
-        if (kpId) {
-          return `https://api.embess.ws/embed/kp/${kpId}${isTv ? `?season=${sNum}&episode=${epNum}` : ""}`;
+      case "vidsrc_pm":
+        return isTv
+          ? `https://vidsrc.pm/embed/tv/${tmdb || 693134}/${sNum}/${epNum}`
+          : `https://vidsrc.pm/embed/movie/${tmdb || 693134}`;
+
+      case "multiembed":
+        return isTv
+          ? `https://multiembed.mov/?video_id=${tmdb || 693134}&tmdb=1&s=${sNum}&e=${epNum}`
+          : `https://multiembed.mov/?video_id=${tmdb || 693134}&tmdb=1`;
+
+      case "vidsrc_to":
+        return isTv
+          ? `https://vidsrc.to/embed/tv/${tmdb || 693134}/${sNum}/${epNum}`
+          : `https://vidsrc.to/embed/movie/${tmdb || 693134}`;
+
+      case "alloha_ru":
+        if (currentAllohaUrl) {
+          return currentAllohaUrl.startsWith("//") ? `https:${currentAllohaUrl}` : currentAllohaUrl;
         }
+        if (kpId) {
+          return `https://theatre.stravers.live/?kp=${kpId}`;
+        }
+        if (imdbId) {
+          return `https://theatre.stravers.live/?imdb=${imdbId}`;
+        }
+        return isTv
+          ? `https://vidlink.pro/tv/${tmdb || 693134}/${sNum}/${epNum}?primaryColor=6366f1`
+          : `https://vidlink.pro/movie/${tmdb || 693134}?primaryColor=6366f1`;
+
+      default:
         return isTv
           ? `https://vidlink.pro/tv/${tmdb || 693134}/${sNum}/${epNum}?primaryColor=6366f1`
           : `https://vidlink.pro/movie/${tmdb || 693134}?primaryColor=6366f1`;
@@ -3582,15 +3598,64 @@ export default function Cinema({
                 </button>
               )}
 
+              {/* Server selector buttons right in the HUD */}
+              <div className="has-cinema-player-hud-servers">
+                <button
+                  type="button"
+                  className={`has-cinema-player-server-pill ${selectedMirror === "vidlink_pro" ? "active" : ""}`}
+                  onClick={() => handleSelectMirror("vidlink_pro")}
+                  title="Сервер 1: Скоростной Full HD 1080p"
+                  data-tv-focusable="true"
+                >
+                  ⚡ Сервер 1 (1080p)
+                </button>
+                <button
+                  type="button"
+                  className={`has-cinema-player-server-pill ${selectedMirror === "kodik_ru" ? "active" : ""}`}
+                  onClick={() => handleSelectMirror("kodik_ru")}
+                  title="Сервер 2: Студии дубляжа (Kodik)"
+                  data-tv-focusable="true"
+                >
+                  🎙️ Сервер 2 (Дубляж)
+                </button>
+                <button
+                  type="button"
+                  className={`has-cinema-player-server-pill ${selectedMirror === "autoembed" ? "active" : ""}`}
+                  onClick={() => handleSelectMirror("autoembed")}
+                  title="Сервер 3: AutoEmbed"
+                  data-tv-focusable="true"
+                >
+                  🌐 Сервер 3
+                </button>
+                <button
+                  type="button"
+                  className={`has-cinema-player-server-pill ${selectedMirror === "vidsrc_pm" ? "active" : ""}`}
+                  onClick={() => handleSelectMirror("vidsrc_pm")}
+                  title="Сервер 4: VidSrc"
+                  data-tv-focusable="true"
+                >
+                  🎬 Сервер 4
+                </button>
+                <button
+                  type="button"
+                  className={`has-cinema-player-server-pill ${selectedMirror === "multiembed" ? "active" : ""}`}
+                  onClick={() => handleSelectMirror("multiembed")}
+                  title="Сервер 5: MultiStream"
+                  data-tv-focusable="true"
+                >
+                  🚀 Сервер 5
+                </button>
+              </div>
+
               {/* Quick mirror switcher */}
               <button
                 type="button"
                 className="has-cinema-player-hud-btn"
                 onClick={handleCycleMirror}
-                title="Переключить на другой сервер/плеер (если текущий не загружается)"
+                title="Переключить на следующий сервер (если текущий заблокирован или не загружается)"
                 data-tv-focusable="true"
               >
-                🔄 Сменить плеер
+                🔄 Сменить источник
               </button>
 
               {/* Single Settings button (Contains voiceover studios & mirrors) */}
@@ -3639,9 +3704,57 @@ export default function Cinema({
             </div>
           </div>
 
+          {/* Quick Fallback Switcher (Always accessible if video fails to load) */}
+          <div className={`has-cinema-player-bottom-failover ${!isHudVisible ? "hud-hidden" : ""}`}>
+            <span className="failover-hint">Не работает плеер?</span>
+            <button
+              type="button"
+              className="failover-btn"
+              onClick={handleCycleMirror}
+              data-tv-focusable="true"
+              title="Переключить на следующий доступный сервер"
+            >
+              🔄 Сменить сервер
+            </button>
+          </div>
+
           {/* Clean 100% Video Canvas */}
           <div className="has-cinema-video-frame">
-            {selectedMirror === "anilibria" ? (
+            {(playingMedia || selectedMedia).is_unreleased ? (
+              <div className="has-cinema-unreleased-player-view">
+                <div className="has-cinema-unreleased-card">
+                  <span className="unreleased-icon">⏳</span>
+                  <h3>Фильм ещё не вышел в цифровой прокат</h3>
+                  <p>
+                    «{(playingMedia || selectedMedia).title}» ещё находится в производстве или кинотеатральном прокате (релиз: {(playingMedia || selectedMedia).release_date_full || (playingMedia || selectedMedia).release_year || "2026"}).
+                  </p>
+                  {(playingMedia || selectedMedia).trailer_youtube_key ? (
+                    <div className="unreleased-trailer-box">
+                      <iframe
+                        src={`https://www.youtube-nocookie.com/embed/${(playingMedia || selectedMedia).trailer_youtube_key}?autoplay=1&rel=0`}
+                        title="Официальный трейлер"
+                        className="unreleased-trailer-frame"
+                        allow="autoplay; fullscreen"
+                        allowFullScreen
+                      />
+                    </div>
+                  ) : (
+                    <p style={{ color: "#64748b", fontSize: "13px" }}>
+                      Цифровой плеер подключится автоматически, как только фильм выйдет в мировой релиз.
+                    </p>
+                  )}
+                  <button
+                    type="button"
+                    className="has-cinema-btn-play"
+                    onClick={handleClosePlayer}
+                    style={{ marginTop: 12 }}
+                    data-tv-focusable="true"
+                  >
+                    ← Вернуться в каталог
+                  </button>
+                </div>
+              </div>
+            ) : selectedMirror === "anilibria" ? (
               anilibriaStreamUrl ? (
                 <video
                   ref={videoRef}
@@ -3664,7 +3777,7 @@ export default function Cinema({
                 title={(playingMedia || selectedMedia).title}
                 className="has-cinema-iframe-elem"
                 allow="autoplay *; fullscreen *; encrypted-media *; picture-in-picture *; clipboard-write *"
-                sandbox="allow-scripts allow-same-origin allow-forms allow-presentation"
+                referrerPolicy="no-referrer-when-downgrade"
                 allowFullScreen
                 {...{ webkitallowfullscreen: "true", mozallowfullscreen: "true" }}
               />
@@ -3734,31 +3847,31 @@ export default function Cinema({
                       <button
                         type="button"
                         className={`has-cinema-drawer-option-btn ${
-                          selectedMirror === "embess_ru" || selectedMirror === "smotrim_ru" ? "active" : ""
+                          selectedMirror === "vidlink_pro" ? "active" : ""
                         }`}
                         onClick={() => {
-                          handleSelectMirror("embess_ru");
-                          showTvToast("Включен русский дубляж (1080p)", "🇷🇺", 1500);
+                          handleSelectMirror("vidlink_pro");
+                          showTvToast("Включен Сервер 1: Full HD (1080p)", "⚡", 1500);
                         }}
                         data-tv-focusable="true"
                       >
-                        <span className="option-name">🇷🇺 Полный русский дубляж (1080p)</span>
-                        <span className="option-desc">Профессиональный многоголосый перевод высокой четкости</span>
+                        <span className="option-name">⚡ Сервер 1: VidLink Pro (1080p)</span>
+                        <span className="option-desc">Высокая скорость, Full HD качество, стабильный поток</span>
                       </button>
 
                       <button
                         type="button"
                         className={`has-cinema-drawer-option-btn ${
-                          selectedMirror === "embess_ru" ? "active" : ""
+                          selectedMirror === "kodik_ru" ? "active" : ""
                         }`}
                         onClick={() => {
-                          handleSelectMirror("embess_ru");
-                          showTvToast("Включен дубляж Embess 1080p", "🎙️", 1500);
+                          handleSelectMirror("kodik_ru");
+                          showTvToast("Включен Сервер 2: Kodik (Дубляж)", "🎙️", 1500);
                         }}
                         data-tv-focusable="true"
                       >
-                        <span className="option-name">🎙️ Embess Full HD</span>
-                        <span className="option-desc">Высокая четкость 1080p с русской дорожкой</span>
+                        <span className="option-name">🎙️ Сервер 2: Kodik (Студии дубляжа)</span>
+                        <span className="option-desc">Профессиональный русский дубляж (LostFilm, Red Head Sound, HDRezka)</span>
                       </button>
 
                       {currentAllohaUrl && (
@@ -3769,12 +3882,12 @@ export default function Cinema({
                           }`}
                           onClick={() => {
                             handleSelectMirror("alloha_ru");
-                            showTvToast("Включен плеер Alloha", "🔊", 1500);
+                            showTvToast("Включен Сервер 3: Alloha", "🔊", 1500);
                           }}
                           data-tv-focusable="true"
                         >
-                          <span className="option-name">🔊 Alloha Player</span>
-                          <span className="option-desc">Студии: Red Head Sound, Flarrow Films, LostFilm</span>
+                          <span className="option-name">🔊 Сервер 3: Alloha Player</span>
+                          <span className="option-desc">Российский балансер кинолент</span>
                         </button>
                       )}
 
