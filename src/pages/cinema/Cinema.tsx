@@ -654,31 +654,103 @@ export default function Cinema({
 
   const [isPlayingState, setIsPlayingState] = useState(true);
 
+  // Dedicated multi-protocol command dispatcher to balancer iframes
+  const sendIframePlaybackCommand = useCallback((command: "play" | "pause" | "toggle") => {
+    const iframe = document.querySelector<HTMLIFrameElement>(".has-cinema-iframe-elem");
+    if (!iframe || !iframe.contentWindow) return;
+
+    const win = iframe.contentWindow;
+
+    // Focus iframe element & contentWindow so remote/keyboard events route into it
+    try {
+      iframe.focus();
+      win.focus();
+    } catch {}
+
+    const post = (payload: any) => {
+      try {
+        win.postMessage(payload, "*");
+      } catch {}
+      try {
+        win.postMessage(JSON.stringify(payload), "*");
+      } catch {}
+    };
+
+    const isPlay = command === "play";
+    const isToggle = command === "toggle";
+
+    // 1. Kodik Player API (Supports both object and stringified commands)
+    post({ key: "kodik_player_api", value: { method: isToggle ? "toggle" : (isPlay ? "play" : "pause") } });
+    if (!isToggle) {
+      post({ key: "kodik_player_api", value: { method: isPlay ? "play" : "pause" } });
+    }
+
+    // 2. Playerjs API (Used by Alloha, Kinoplay, Collaps, VideoCDN, Ashdi, HDRezka)
+    post({ api: isToggle ? "toggle" : (isPlay ? "play" : "pause") });
+    if (!isToggle) {
+      post({ api: isPlay ? "play" : "pause" });
+    }
+
+    // 3. Alloha API
+    post({ action: isPlay ? "play" : "pause" });
+    post({ method: isPlay ? "play" : "pause" });
+
+    // 4. VidLink Pro / Video.js API
+    post({ type: isPlay ? "PLAYER_PLAY" : "PLAYER_PAUSE" });
+    post({ type: isPlay ? "play" : "pause" });
+    post({ action: isPlay ? "play" : "pause" });
+
+    // 5. YouTube / VidSrc / AutoEmbed HTML5 API
+    post({ event: "command", func: isPlay ? "playVideo" : "pauseVideo", args: "" });
+
+    // 6. Generic HTML5 postMessage
+    post({ method: isPlay ? "play" : "pause" });
+    post({ command: isPlay ? "play" : "pause" });
+
+    // 7. Spacebar / K keyboard event simulation into iframe
+    try {
+      const spaceDown = new KeyboardEvent("keydown", { key: " ", code: "Space", keyCode: 32, which: 32, bubbles: true });
+      iframe.dispatchEvent(spaceDown);
+      const kDown = new KeyboardEvent("keydown", { key: "k", code: "KeyK", keyCode: 75, which: 75, bubbles: true });
+      iframe.dispatchEvent(kDown);
+    } catch {}
+  }, []);
+
+  const triggerPlayerPlay = useCallback(() => {
+    if (videoRef.current) {
+      videoRef.current.play().catch(() => {});
+    } else {
+      sendIframePlaybackCommand("play");
+    }
+    setIsPlayingState(true);
+    showTvToast("Воспроизведение", "▶", 1200);
+  }, [sendIframePlaybackCommand, showTvToast]);
+
+  const triggerPlayerPause = useCallback(() => {
+    if (videoRef.current) {
+      videoRef.current.pause();
+    } else {
+      sendIframePlaybackCommand("pause");
+    }
+    setIsPlayingState(false);
+    showTvToast("Пауза", "⏸", 1200);
+  }, [sendIframePlaybackCommand, showTvToast]);
+
   const triggerPlayerPlayPause = useCallback(() => {
     if (videoRef.current) {
       if (videoRef.current.paused) {
-        videoRef.current.play().catch(() => {});
-        setIsPlayingState(true);
-        showTvToast("Воспроизведение", "▶", 1200);
+        triggerPlayerPlay();
       } else {
-        videoRef.current.pause();
-        setIsPlayingState(false);
-        showTvToast("Пауза", "⏸", 1200);
+        triggerPlayerPause();
       }
     } else {
-      const iframe = document.querySelector<HTMLIFrameElement>(".has-cinema-iframe-elem");
-      if (iframe && iframe.contentWindow) {
-        setIsPlayingState((prev) => {
-          const next = !prev;
-          iframe.contentWindow?.postMessage({ key: "kodik_player_api", value: { method: next ? "play" : "pause" } }, "*");
-          iframe.contentWindow?.postMessage({ api: next ? "play" : "pause" }, "*");
-          iframe.contentWindow?.postMessage({ type: next ? "PLAY" : "PAUSE" }, "*");
-          showTvToast(next ? "Воспроизведение" : "Пауза", next ? "▶" : "⏸", 1200);
-          return next;
-        });
+      if (isPlayingState) {
+        triggerPlayerPause();
+      } else {
+        triggerPlayerPlay();
       }
     }
-  }, [showTvToast]);
+  }, [isPlayingState, triggerPlayerPlay, triggerPlayerPause]);
 
   const triggerPlayerSeek = useCallback((secondsDelta: number) => {
     if (videoRef.current) {
@@ -689,8 +761,16 @@ export default function Cinema({
     } else {
       const iframe = document.querySelector<HTMLIFrameElement>(".has-cinema-iframe-elem");
       if (iframe && iframe.contentWindow) {
-        iframe.contentWindow.postMessage({ key: "kodik_player_api", value: { method: "seek_delta", time: secondsDelta } }, "*");
-        iframe.contentWindow.postMessage({ api: "seek", delta: secondsDelta }, "*");
+        const win = iframe.contentWindow;
+        const post = (payload: any) => {
+          try { win.postMessage(payload, "*"); } catch {}
+          try { win.postMessage(JSON.stringify(payload), "*"); } catch {}
+        };
+        post({ key: "kodik_player_api", value: { method: "seek_delta", time: secondsDelta } });
+        post({ api: "seek", delta: secondsDelta });
+        post({ api: "seek_delta", time: secondsDelta });
+        post({ type: "SEEK_DELTA", delta: secondsDelta });
+        post({ event: "command", func: "seekTo", args: [Math.max(0, currentPlaybackRef.current.currentTime + secondsDelta), true] });
       }
     }
     showTvToast(secondsDelta > 0 ? `+${secondsDelta} сек` : `${secondsDelta} сек`, secondsDelta > 0 ? "⏩" : "⏪", 1000);
@@ -1469,7 +1549,14 @@ export default function Cinema({
       mirrorWatchdogTimerRef.current = null;
     }
     setIsMirrorConnecting(false);
-  }, []);
+    // Auto-trigger play once iframe scripts initialize
+    setTimeout(() => {
+      sendIframePlaybackCommand("play");
+    }, 500);
+    setTimeout(() => {
+      sendIframePlaybackCommand("play");
+    }, 1500);
+  }, [sendIframePlaybackCommand]);
 
   // Start playback for a media item (movie or specific series episode)
   const startPlayback = (media: CinemaMediaItem, seasonNum: number = 1, episode?: CinemaEpisode) => {
@@ -1479,6 +1566,7 @@ export default function Cinema({
     setRussianDubNotice(null);
     setAnilibriaStreamUrl(null);
     setIsHudVisible(true);
+    setIsPlayingState(true);
     setShowPlayerSettings(false);
     setShowPlayerEpisodes(false);
     resetHudTimer();
@@ -1907,6 +1995,25 @@ export default function Cinema({
           } catch {}
         }
         if (!data || typeof data !== "object") return;
+
+        // Update play/pause status from player messages
+        if (
+          data.event === "play" ||
+          data.type === "play" ||
+          data.type === "PLAY" ||
+          data.key === "kodik_player_play" ||
+          (data.type === "PLAYER_EVENT" && data.data?.event === "play")
+        ) {
+          setIsPlayingState(true);
+        } else if (
+          data.event === "pause" ||
+          data.type === "pause" ||
+          data.type === "PAUSE" ||
+          data.key === "kodik_player_pause" ||
+          (data.type === "PLAYER_EVENT" && data.data?.event === "pause")
+        ) {
+          setIsPlayingState(false);
+        }
 
         // VidLink postMessage
         if (data.type === "MEDIA_DATA" && data.data) {
@@ -2709,7 +2816,7 @@ export default function Cinema({
   const currentSeasonData: CinemaSeason =
     selectedMedia.seasons.find((s) => s.season_number === selectedSeason) || selectedMedia.seasons[0];
 
-  // Balancer embed URL with multiple verified mirror selection
+  // Balancer embed URL with multiple verified mirror selection & autoplay flag
   const getBalancerEmbedUrl = (): string => {
     const media = playingMedia || selectedMedia;
     const tmdb = media.tmdb_id;
@@ -2719,62 +2826,72 @@ export default function Cinema({
     const kpId = currentKpId || (tmdb ? KNOWN_KP_MAP[tmdb] : null);
     const imdbId = currentImdbId;
 
+    const appendAutoplay = (url: string): string => {
+      if (!url) return url;
+      if (url.includes("autoplay=")) return url;
+      const joiner = url.includes("?") ? "&" : "?";
+      const val = url.includes("vidlink.pro") ? "true" : "1";
+      return `${url}${joiner}autoplay=${val}`;
+    };
+
     switch (selectedMirror) {
       case "vidlink_pro":
         return isTv
-          ? `https://vidlink.pro/tv/${tmdb || 693134}/${sNum}/${epNum}?primaryColor=6366f1`
-          : `https://vidlink.pro/movie/${tmdb || 693134}?primaryColor=6366f1`;
+          ? `https://vidlink.pro/tv/${tmdb || 693134}/${sNum}/${epNum}?autoplay=true&primaryColor=6366f1`
+          : `https://vidlink.pro/movie/${tmdb || 693134}?autoplay=true&primaryColor=6366f1`;
 
       case "kodik_ru":
         if (selectedKodikLink) {
-          return selectedKodikLink.startsWith("//") ? `https:${selectedKodikLink}` : selectedKodikLink;
+          const l = selectedKodikLink.startsWith("//") ? `https:${selectedKodikLink}` : selectedKodikLink;
+          return appendAutoplay(l);
         }
         if (kodikResults.length > 0 && kodikResults[0]?.link) {
-          const l = kodikResults[0].link;
-          return l.startsWith("//") ? `https:${l}` : l;
+          const l = kodikResults[0].link.startsWith("//") ? `https:${kodikResults[0].link}` : kodikResults[0].link;
+          return appendAutoplay(l);
         }
         return isTv
-          ? `https://vidlink.pro/tv/${tmdb || 693134}/${sNum}/${epNum}?primaryColor=6366f1`
-          : `https://vidlink.pro/movie/${tmdb || 693134}?primaryColor=6366f1`;
+          ? `https://vidlink.pro/tv/${tmdb || 693134}/${sNum}/${epNum}?autoplay=true&primaryColor=6366f1`
+          : `https://vidlink.pro/movie/${tmdb || 693134}?autoplay=true&primaryColor=6366f1`;
 
       case "autoembed":
         return isTv
-          ? `https://player.autoembed.co/embed/tv/${tmdb || 693134}/${sNum}/${epNum}`
-          : `https://player.autoembed.co/embed/movie/${tmdb || 693134}`;
+          ? `https://player.autoembed.co/embed/tv/${tmdb || 693134}/${sNum}/${epNum}?autoplay=1`
+          : `https://player.autoembed.co/embed/movie/${tmdb || 693134}?autoplay=1`;
 
       case "vidsrc_pm":
         return isTv
-          ? `https://vidsrc.pm/embed/tv/${tmdb || 693134}/${sNum}/${epNum}`
-          : `https://vidsrc.pm/embed/movie/${tmdb || 693134}`;
+          ? `https://vidsrc.pm/embed/tv/${tmdb || 693134}/${sNum}/${epNum}?autoplay=1`
+          : `https://vidsrc.pm/embed/movie/${tmdb || 693134}?autoplay=1`;
 
       case "multiembed":
         return isTv
-          ? `https://multiembed.mov/?video_id=${tmdb || 693134}&tmdb=1&s=${sNum}&e=${epNum}`
-          : `https://multiembed.mov/?video_id=${tmdb || 693134}&tmdb=1`;
+          ? `https://multiembed.mov/?video_id=${tmdb || 693134}&tmdb=1&s=${sNum}&e=${epNum}&autoplay=1`
+          : `https://multiembed.mov/?video_id=${tmdb || 693134}&tmdb=1&autoplay=1`;
 
       case "vidsrc_to":
         return isTv
-          ? `https://vidsrc.to/embed/tv/${tmdb || 693134}/${sNum}/${epNum}`
-          : `https://vidsrc.to/embed/movie/${tmdb || 693134}`;
+          ? `https://vidsrc.to/embed/tv/${tmdb || 693134}/${sNum}/${epNum}?autoplay=1`
+          : `https://vidsrc.to/embed/movie/${tmdb || 693134}?autoplay=1`;
 
       case "alloha_ru":
         if (currentAllohaUrl) {
-          return currentAllohaUrl.startsWith("//") ? `https:${currentAllohaUrl}` : currentAllohaUrl;
+          const l = currentAllohaUrl.startsWith("//") ? `https:${currentAllohaUrl}` : currentAllohaUrl;
+          return appendAutoplay(l);
         }
         if (kpId) {
-          return `https://theatre.stravers.live/?kp=${kpId}`;
+          return `https://theatre.stravers.live/?kp=${kpId}&autoplay=1`;
         }
         if (imdbId) {
-          return `https://theatre.stravers.live/?imdb=${imdbId}`;
+          return `https://theatre.stravers.live/?imdb=${imdbId}&autoplay=1`;
         }
         return isTv
-          ? `https://vidlink.pro/tv/${tmdb || 693134}/${sNum}/${epNum}?primaryColor=6366f1`
-          : `https://vidlink.pro/movie/${tmdb || 693134}?primaryColor=6366f1`;
+          ? `https://vidlink.pro/tv/${tmdb || 693134}/${sNum}/${epNum}?autoplay=true&primaryColor=6366f1`
+          : `https://vidlink.pro/movie/${tmdb || 693134}?autoplay=true&primaryColor=6366f1`;
 
       default:
         return isTv
-          ? `https://vidlink.pro/tv/${tmdb || 693134}/${sNum}/${epNum}?primaryColor=6366f1`
-          : `https://vidlink.pro/movie/${tmdb || 693134}?primaryColor=6366f1`;
+          ? `https://vidlink.pro/tv/${tmdb || 693134}/${sNum}/${epNum}?autoplay=true&primaryColor=6366f1`
+          : `https://vidlink.pro/movie/${tmdb || 693134}?autoplay=true&primaryColor=6366f1`;
     }
   };
 
@@ -4585,6 +4702,7 @@ export default function Cinema({
                 allow="autoplay *; fullscreen *; encrypted-media *; picture-in-picture *; clipboard-write *"
                 referrerPolicy="no-referrer-when-downgrade"
                 allowFullScreen
+                tabIndex={0}
                 onLoad={handleIframeLoaded}
                 onError={() => handleAutoSwitchNextMirror("Сервер вернул ошибку")}
                 {...{ webkitallowfullscreen: "true", mozallowfullscreen: "true" }}
