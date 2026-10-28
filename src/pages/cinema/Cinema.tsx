@@ -704,15 +704,82 @@ export default function Cinema({
     post({ command: isPlay ? "play" : "pause" });
   }, []);
 
+  const setPlayerVolumeMax = useCallback((showToast: boolean = false) => {
+    // 1. Native HTML5 Video Element
+    if (videoRef.current) {
+      try {
+        videoRef.current.volume = 1.0;
+        videoRef.current.muted = false;
+      } catch {}
+    }
+
+    // 2. Iframe Players (Kodik, Alloha, Playerjs, VidLink, YouTube/AutoEmbed, etc.)
+    const iframe = document.querySelector<HTMLIFrameElement>(".has-cinema-iframe-elem");
+    if (iframe && iframe.contentWindow) {
+      const win = iframe.contentWindow;
+      const post = (payload: any) => {
+        try { win.postMessage(payload, "*"); } catch {}
+        try { win.postMessage(JSON.stringify(payload), "*"); } catch {}
+      };
+
+      // 1. Kodik API
+      post({ key: "kodik_player_api", value: { method: "volume", volume: 1 } });
+      post({ key: "kodik_player_api", value: { method: "volume", volume: 100 } });
+      post({ key: "kodik_player_api", value: { method: "unmute" } });
+
+      // 2. Playerjs API (Alloha, Kinoplay, Collaps, VideoCDN, Ashdi, HDRezka)
+      post({ api: "volume", volume: 1 });
+      post({ api: "volume", volume: 100 });
+      post({ api: "volume", value: 100 });
+      post({ api: "unmute" });
+
+      // 3. Alloha API
+      post({ action: "volume", volume: 1 });
+      post({ action: "volume", value: 100 });
+      post({ action: "unmute" });
+      post({ method: "volume", value: 1 });
+      post({ method: "setVolume", value: 100 });
+      post({ method: "unmute" });
+
+      // 4. VidLink Pro / Video.js API
+      post({ type: "VOLUME", volume: 1 });
+      post({ type: "SET_VOLUME", data: { volume: 1 } });
+      post({ type: "SET_VOLUME", data: { volume: 100 } });
+      post({ type: "unmute" });
+      post({ action: "volume", value: 1 });
+      post({ action: "unmute" });
+
+      // 5. YouTube / VidSrc / AutoEmbed HTML5 API
+      post({ event: "command", func: "setVolume", args: [100] });
+      post({ event: "command", func: "unMute", args: "" });
+
+      // 6. Generic HTML5 postMessage
+      post({ method: "setVolume", volume: 100 });
+      post({ method: "setVolume", value: 100 });
+      post({ method: "unmute" });
+      post({ command: "setVolume", volume: 100 });
+      post({ command: "unmute" });
+    }
+
+    if (showToast) {
+      showTvToast("Громкость плеера: 100%", "🔊", 1500);
+    }
+  }, [showTvToast]);
+
   const triggerPlayerPlay = useCallback(() => {
     if (videoRef.current) {
+      try {
+        videoRef.current.muted = false;
+        videoRef.current.volume = 1.0;
+      } catch {}
       videoRef.current.play().catch(() => {});
     } else {
       sendIframePlaybackCommand("play");
     }
+    setPlayerVolumeMax(false);
     setIsPlayingState(true);
     showTvToast("Воспроизведение", "▶", 1200);
-  }, [sendIframePlaybackCommand, showTvToast]);
+  }, [sendIframePlaybackCommand, setPlayerVolumeMax, showTvToast]);
 
   const triggerPlayerPause = useCallback(() => {
     if (videoRef.current) {
@@ -1467,6 +1534,10 @@ export default function Cinema({
       hls.loadSource(anilibriaStreamUrl);
       hls.attachMedia(video);
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        try {
+          video.volume = 1.0;
+          video.muted = false;
+        } catch {}
         video.play().catch(() => {});
       });
       hls.on(Hls.Events.ERROR, (_event, data) => {
@@ -1570,14 +1641,19 @@ export default function Cinema({
       mirrorWatchdogTimerRef.current = null;
     }
     setIsMirrorConnecting(false);
-    // Auto-trigger play once iframe scripts initialize
+    // Auto-trigger play and max volume once iframe scripts initialize
     setTimeout(() => {
       sendIframePlaybackCommand("play");
+      setPlayerVolumeMax(false);
     }, 500);
     setTimeout(() => {
       sendIframePlaybackCommand("play");
+      setPlayerVolumeMax(false);
     }, 1500);
-  }, [sendIframePlaybackCommand]);
+    setTimeout(() => {
+      setPlayerVolumeMax(false);
+    }, 2800);
+  }, [sendIframePlaybackCommand, setPlayerVolumeMax]);
 
   // Start playback for a media item (movie or specific series episode)
   const startPlayback = (media: CinemaMediaItem, seasonNum: number = 1, episode?: CinemaEpisode) => {
@@ -1591,6 +1667,13 @@ export default function Cinema({
     setShowPlayerSettings(false);
     setShowPlayerEpisodes(false);
     resetHudTimer();
+
+    if (videoRef.current) {
+      try {
+        videoRef.current.volume = 1.0;
+        videoRef.current.muted = false;
+      } catch {}
+    }
 
     const ep =
       episode ||
@@ -4887,6 +4970,18 @@ export default function Cinema({
                         title="Перемотать опенинг / интро на 85 секунд вперед"
                       >
                         ⏩ Пропуск опенинга (+85с)
+                      </button>
+                      <button
+                        type="button"
+                        className="has-cinema-drawer-chip"
+                        onClick={() => {
+                          setPlayerVolumeMax(true);
+                          setShowPlayerSettings(false);
+                        }}
+                        data-tv-focusable="true"
+                        title="Выставить громкость плеера на максимум (100%)"
+                      >
+                        🔊 Громкость 100%
                       </button>
                       <button
                         type="button"

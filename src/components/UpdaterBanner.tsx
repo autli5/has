@@ -88,16 +88,24 @@ const isNewerSemver = (remote: string, current: string): boolean => {
 
 export function UpdaterBanner({ isTvEnvironment }: UpdaterBannerProps = {}) {
   const [isTv, setIsTv] = useState<boolean>(() => isTvEnvironment ?? detectTvEnvironment());
-  const [currentAppVersion, setCurrentAppVersion] = useState<string>("0.0.14");
+  const [currentAppVersion, setCurrentAppVersion] = useState<string>("0.0.15");
   const [updateAvailable, setUpdateAvailable] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [statusText, setStatusText] = useState<string>("Загрузка обновления...");
   const [error, setError] = useState<string | null>(null);
   const [dismissed, setDismissed] = useState(false);
 
-  // TV remote navigation: "update" | "skip" | "exit"
-  const [tvFocusedBtn, setTvFocusedBtn] = useState<"update" | "skip" | "exit">("update");
+  // Auto-update preferences for Android TV
+  const [autoUpdateTv, setAutoUpdateTv] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    return localStorage.getItem("has_auto_update_tv") === "true";
+  });
+  const [autoCountdown, setAutoCountdown] = useState<number | null>(null);
+
+  // TV remote navigation: "update" | "skip" | "exit" | "autotoggle"
+  const [tvFocusedBtn, setTvFocusedBtn] = useState<"update" | "skip" | "exit" | "autotoggle">("update");
   const updateBtnRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
@@ -270,16 +278,16 @@ export function UpdaterBanner({ isTvEnvironment }: UpdaterBannerProps = {}) {
       case "android_tv":
         return {
           badge: "📺 Android TV",
-          title: `Доступно обновление для Android TV (v${version})`,
-          desc: "Специальная сборка для телевизоров и ТВ-приставок с поддержкой пульта ДУ (D-Pad), Leanback-интерфейса и плавного воспроизведения.",
-          btnLabel: "🚀 Обновить APK для ТВ",
+          title: "Хотите ли вы обновить приложение HAS?",
+          desc: "Доступна новая оптимизированная версия для телевизоров и ТВ-приставок с поддержкой пульта ДУ, балансеров видео и повышенной стабильностью.",
+          btnLabel: "🚀 Да, обновить сейчас",
           icon: "📺",
         };
       case "android_mobile":
         return {
           badge: "📱 Android",
-          title: `Доступно обновление для Android (v${version})`,
-          desc: "Новая версия приложения для мобильных телефонов и планшетов на Android.",
+          title: "Хотите ли вы обновить приложение HAS?",
+          desc: "Новая версия приложения для мобильных устройств на Android.",
           btnLabel: "🚀 Скачать APK для Android",
           icon: "📱",
         };
@@ -313,7 +321,7 @@ export function UpdaterBanner({ isTvEnvironment }: UpdaterBannerProps = {}) {
   const platformInfo = getPlatformDetails();
 
   // Smart download target selector
-  const resolveTargetUrl = (): string => {
+  const resolveTargetUrl = useCallback((): string => {
     if (!updateInfo) return "https://github.com/autli5/has/releases/latest";
     switch (clientPlatform) {
       case "windows":
@@ -329,12 +337,29 @@ export function UpdaterBanner({ isTvEnvironment }: UpdaterBannerProps = {}) {
       default:
         return updateInfo.downloadUrl || "https://github.com/autli5/has/releases/latest";
     }
-  };
+  }, [clientPlatform, updateInfo]);
+
+  const cancelAutoCountdown = useCallback(() => {
+    setAutoCountdown(null);
+  }, []);
+
+  const toggleAutoUpdate = useCallback(() => {
+    setAutoUpdateTv((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem("has_auto_update_tv", next ? "true" : "false");
+      } catch {}
+      return next;
+    });
+    cancelAutoCountdown();
+  }, [cancelAutoCountdown]);
 
   const handleInstall = useCallback(async () => {
+    cancelAutoCountdown();
     setDownloading(true);
     setError(null);
     setProgress(0);
+    setStatusText("Подготовка к установке обновления...");
 
     // Desktop Windows / macOS / Linux Tauri updater plugin
     if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window && !isTv) {
@@ -346,6 +371,7 @@ export function UpdaterBanner({ isTvEnvironment }: UpdaterBannerProps = {}) {
         if (update?.available) {
           let downloaded = 0;
           let total = 0;
+          setStatusText("Загрузка обновления...");
 
           await update.downloadAndInstall((event: any) => {
             if (event.event === "Started") {
@@ -354,9 +380,12 @@ export function UpdaterBanner({ isTvEnvironment }: UpdaterBannerProps = {}) {
               downloaded += event.data?.chunkLength ?? 0;
             } else if (event.event === "Finished") {
               setProgress(100);
+              setStatusText("Перезапуск программы...");
             }
             if (total > 0) {
-              setProgress(Math.round((downloaded / total) * 100));
+              const p = Math.round((downloaded / total) * 100);
+              setProgress(p);
+              setStatusText(`Загрузка: ${p}%`);
             }
           });
 
@@ -368,30 +397,82 @@ export function UpdaterBanner({ isTvEnvironment }: UpdaterBannerProps = {}) {
       }
     }
 
-    // Direct download and open target platform installer/APK
+    // Android TV / Mobile / Direct APK Download & Installation
     const targetUrl = resolveTargetUrl();
+    setStatusText("Подключение к серверу загрузки APK...");
 
-    let p = 0;
-    const progressTimer = setInterval(() => {
-      p += 20;
-      if (p >= 100) {
-        clearInterval(progressTimer);
-        setProgress(100);
-        setTimeout(async () => {
-          try {
-            const { openUrl } = await import("@tauri-apps/plugin-opener");
-            await openUrl(targetUrl);
-          } catch {
-            window.open(targetUrl, "_blank");
+    let streamSucceeded = false;
+    try {
+      const response = await fetch(targetUrl, { mode: "cors" });
+      if (response.ok && response.body) {
+        const contentLength = +(response.headers.get("Content-Length") || 0);
+        const reader = response.body.getReader();
+        let received = 0;
+        const chunks: Uint8Array[] = [];
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (value) {
+            chunks.push(value);
+            received += value.length;
+            if (contentLength > 0) {
+              const pct = Math.min(99, Math.round((received / contentLength) * 100));
+              setProgress(pct);
+              setStatusText(`Скачивание APK: ${pct}% (${(received / 1024 / 1024).toFixed(1)} МБ)`);
+            } else {
+              setStatusText(`Скачивание APK: ${(received / 1024 / 1024).toFixed(1)} МБ`);
+            }
           }
-          setDismissed(true);
-          setDownloading(false);
-        }, 400);
-      } else {
-        setProgress(p);
+        }
+
+        setProgress(100);
+        setStatusText("APK успешно скачан! Запуск установки...");
+        streamSucceeded = true;
+
+        const blob = new Blob(chunks as BlobPart[], { type: "application/vnd.android.package-archive" });
+        const blobUrl = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = blobUrl;
+        a.download = `has-tv-v${updateInfo?.version || "update"}.apk`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
       }
-    }, 150);
-  }, [isTv, clientPlatform, updateInfo]);
+    } catch {
+      // Fetch streaming can be restricted by CORS on certain hosts; fallback below
+    }
+
+    if (!streamSucceeded) {
+      let p = 0;
+      await new Promise<void>((resolve) => {
+        const progressTimer = setInterval(() => {
+          p += 20;
+          if (p >= 100) {
+            clearInterval(progressTimer);
+            setProgress(100);
+            setStatusText("Запуск установщика приложения...");
+            resolve();
+          } else {
+            setProgress(p);
+            setStatusText(`Загрузка: ${p}%`);
+          }
+        }, 120);
+      });
+    }
+
+    try {
+      const { openUrl } = await import("@tauri-apps/plugin-opener");
+      await openUrl(targetUrl);
+    } catch {
+      window.open(targetUrl, "_blank");
+    }
+
+    setTimeout(() => {
+      setDismissed(true);
+      setDownloading(false);
+    }, 1800);
+  }, [cancelAutoCountdown, isTv, updateInfo, resolveTargetUrl]);
 
   // Clean Exit from TV application
   const handleExitApp = useCallback(async () => {
@@ -402,6 +483,30 @@ export function UpdaterBanner({ isTvEnvironment }: UpdaterBannerProps = {}) {
       window.close();
     }
   }, []);
+
+  // Auto-update countdown for Android TV
+  useEffect(() => {
+    if (!updateAvailable || dismissed || !isTv || downloading) return;
+    if (!autoUpdateTv) {
+      setAutoCountdown(null);
+      return;
+    }
+
+    setAutoCountdown(5);
+    const interval = setInterval(() => {
+      setAutoCountdown((prev) => {
+        if (prev === null) return null;
+        if (prev <= 1) {
+          clearInterval(interval);
+          handleInstall();
+          return null;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [updateAvailable, dismissed, isTv, downloading, autoUpdateTv, handleInstall]);
 
   // Strict Remote Control D-Pad Navigation for TV Update Modal
   useEffect(() => {
@@ -415,37 +520,49 @@ export function UpdaterBanner({ isTvEnvironment }: UpdaterBannerProps = {}) {
     }, 50);
 
     const handleTvKeyDown = (e: KeyboardEvent) => {
-      // Cycle between "update" -> "skip" -> "exit"
-      if (
-        e.key === "ArrowRight" ||
-        e.key === "ArrowDown" ||
-        e.keyCode === 22 ||
-        e.keyCode === 20 ||
-        e.key === "Tab"
-      ) {
+      cancelAutoCountdown();
+
+      // Down: switch to auto-update toggle
+      if (e.key === "ArrowDown" || e.keyCode === 20) {
         e.preventDefault();
-        setTvFocusedBtn((prev) => {
-          if (prev === "update") return "skip";
-          if (prev === "skip") return "exit";
-          return "update";
-        });
         playTvBeep(520, 0.025);
+        if (tvFocusedBtn !== "autotoggle") {
+          setTvFocusedBtn("autotoggle");
+        }
         return;
       }
 
-      if (
-        e.key === "ArrowLeft" ||
-        e.key === "ArrowUp" ||
-        e.keyCode === 21 ||
-        e.keyCode === 19
-      ) {
+      // Up: switch back from auto-update toggle to update button
+      if (e.key === "ArrowUp" || e.keyCode === 19) {
         e.preventDefault();
+        playTvBeep(520, 0.025);
+        if (tvFocusedBtn === "autotoggle") {
+          setTvFocusedBtn("update");
+        }
+        return;
+      }
+
+      // Left: cycle within top button row
+      if (e.key === "ArrowLeft" || e.keyCode === 21) {
+        e.preventDefault();
+        playTvBeep(520, 0.025);
         setTvFocusedBtn((prev) => {
           if (prev === "exit") return "skip";
           if (prev === "skip") return "update";
           return "exit";
         });
+        return;
+      }
+
+      // Right / Tab: cycle within top button row
+      if (e.key === "ArrowRight" || e.keyCode === 22 || e.key === "Tab") {
+        e.preventDefault();
         playTvBeep(520, 0.025);
+        setTvFocusedBtn((prev) => {
+          if (prev === "update") return "skip";
+          if (prev === "skip") return "exit";
+          return "update";
+        });
         return;
       }
 
@@ -458,6 +575,9 @@ export function UpdaterBanner({ isTvEnvironment }: UpdaterBannerProps = {}) {
         } else if (tvFocusedBtn === "exit") {
           playTvBeep(320, 0.06);
           handleExitApp();
+        } else if (tvFocusedBtn === "autotoggle") {
+          playTvBeep(560, 0.04);
+          toggleAutoUpdate();
         } else {
           playTvBeep(420, 0.04);
           setDismissed(true);
@@ -475,7 +595,7 @@ export function UpdaterBanner({ isTvEnvironment }: UpdaterBannerProps = {}) {
 
     window.addEventListener("keydown", handleTvKeyDown);
     return () => window.removeEventListener("keydown", handleTvKeyDown);
-  }, [updateAvailable, dismissed, isTv, downloading, tvFocusedBtn, handleInstall, handleExitApp]);
+  }, [updateAvailable, dismissed, isTv, downloading, tvFocusedBtn, handleInstall, handleExitApp, cancelAutoCountdown, toggleAutoUpdate]);
 
   if (!updateAvailable || dismissed) return null;
 
@@ -487,14 +607,20 @@ export function UpdaterBanner({ isTvEnvironment }: UpdaterBannerProps = {}) {
       <div className="has-tv-updater-overlay" role="dialog" aria-modal="true">
         <div className="has-tv-updater-card">
           <div className="has-tv-updater-icon-ring">{platformInfo.icon}</div>
-          <h2 className="has-tv-updater-title">{platformInfo.title}</h2>
+          <h2 className="has-tv-updater-title">Хотите ли вы обновить приложение HAS?</h2>
           <div className="has-tv-updater-version-tag">
-            <span>{platformInfo.badge}</span>
+            <span>📺 Android TV • v{currentAppVersion} ➔ v{updateInfo?.version || "новейшая"}</span>
           </div>
 
           <p className="has-tv-updater-desc">
             {updateInfo?.body || platformInfo.desc}
           </p>
+
+          {autoCountdown !== null && !downloading && (
+            <div className="has-tv-updater-countdown">
+              ⚡ Автообновление активно: начнется через {autoCountdown} сек... (нажмите любую кнопку для отмены)
+            </div>
+          )}
 
           {downloading ? (
             <div className="has-tv-updater-progress-container">
@@ -505,70 +631,104 @@ export function UpdaterBanner({ isTvEnvironment }: UpdaterBannerProps = {}) {
                 />
               </div>
               <span className="has-tv-updater-progress-text">
-                Загрузка и установка обновления: {progress}%
+                {statusText}
               </span>
             </div>
           ) : (
-            <div className="has-tv-updater-buttons">
-              {/* Button 1: Обновить APK для ТВ */}
-              <button
-                ref={updateBtnRef}
-                type="button"
-                className={`has-tv-updater-btn btn-update ${
-                  tvFocusedBtn === "update" ? "focused" : ""
-                }`}
-                onClick={() => {
-                  playTvBeep(680, 0.05);
-                  handleInstall();
-                }}
-                onMouseEnter={() => setTvFocusedBtn("update")}
-                tabIndex={0}
-                data-tv-focusable="true"
-              >
-                <span>{platformInfo.btnLabel}</span>
-              </button>
+            <>
+              <div className="has-tv-updater-buttons">
+                {/* Button 1: Да, обновить сейчас */}
+                <button
+                  ref={updateBtnRef}
+                  type="button"
+                  className={`has-tv-updater-btn btn-update ${
+                    tvFocusedBtn === "update" ? "focused" : ""
+                  }`}
+                  onClick={() => {
+                    playTvBeep(680, 0.05);
+                    cancelAutoCountdown();
+                    handleInstall();
+                  }}
+                  onMouseEnter={() => {
+                    cancelAutoCountdown();
+                    setTvFocusedBtn("update");
+                  }}
+                  tabIndex={0}
+                  data-tv-focusable="true"
+                >
+                  <span>{platformInfo.btnLabel}</span>
+                </button>
 
-              {/* Button 2: Пропустить */}
-              <button
-                type="button"
-                className={`has-tv-updater-btn btn-skip ${
-                  tvFocusedBtn === "skip" ? "focused" : ""
-                }`}
-                onClick={() => {
-                  playTvBeep(420, 0.04);
-                  setDismissed(true);
-                }}
-                onMouseEnter={() => setTvFocusedBtn("skip")}
-                tabIndex={0}
-                data-tv-focusable="true"
-              >
-                <span>Пропустить</span>
-              </button>
+                {/* Button 2: Напомнить позже */}
+                <button
+                  type="button"
+                  className={`has-tv-updater-btn btn-skip ${
+                    tvFocusedBtn === "skip" ? "focused" : ""
+                  }`}
+                  onClick={() => {
+                    playTvBeep(420, 0.04);
+                    cancelAutoCountdown();
+                    setDismissed(true);
+                  }}
+                  onMouseEnter={() => {
+                    cancelAutoCountdown();
+                    setTvFocusedBtn("skip");
+                  }}
+                  tabIndex={0}
+                  data-tv-focusable="true"
+                >
+                  <span>Напомнить позже</span>
+                </button>
 
-              {/* Button 3: Выход из приложения (Exit) */}
+                {/* Button 3: Выход из приложения (Exit) */}
+                <button
+                  type="button"
+                  className={`has-tv-updater-btn btn-exit ${
+                    tvFocusedBtn === "exit" ? "focused" : ""
+                  }`}
+                  onClick={() => {
+                    playTvBeep(320, 0.06);
+                    cancelAutoCountdown();
+                    handleExitApp();
+                  }}
+                  onMouseEnter={() => {
+                    cancelAutoCountdown();
+                    setTvFocusedBtn("exit");
+                  }}
+                  tabIndex={0}
+                  data-tv-focusable="true"
+                  title="Выйти из приложения"
+                >
+                  <span>✕ Выход</span>
+                </button>
+              </div>
+
+              {/* Auto-update Toggle Chip for Android TV */}
               <button
                 type="button"
-                className={`has-tv-updater-btn btn-exit ${
-                  tvFocusedBtn === "exit" ? "focused" : ""
+                className={`has-tv-updater-autotoggle ${autoUpdateTv ? "active" : ""} ${
+                  tvFocusedBtn === "autotoggle" ? "focused" : ""
                 }`}
-                onClick={() => {
-                  playTvBeep(320, 0.06);
-                  handleExitApp();
+                onClick={toggleAutoUpdate}
+                onMouseEnter={() => {
+                  cancelAutoCountdown();
+                  setTvFocusedBtn("autotoggle");
                 }}
-                onMouseEnter={() => setTvFocusedBtn("exit")}
                 tabIndex={0}
                 data-tv-focusable="true"
-                title="Выйти из приложения"
+                title="Переключить режим автоматического скачивания обновлений для ТВ"
               >
-                <span>✕ Выход</span>
+                {autoUpdateTv
+                  ? "🟢 Автообновление для TV: ВКЛЮЧЕНО (скачивать без запроса)"
+                  : "⚪ Автообновление для TV: ВЫКЛЮЧЕНО (нажмите OK чтобы включить)"}
               </button>
-            </div>
+            </>
           )}
 
           {error && <div className="updater-error" style={{ marginTop: 16 }}>{error}</div>}
 
           <div className="has-tv-updater-remote-hint">
-            ◄ ► Стрелки на пульте: выбор • OK: подтвердить • Back: пропустить
+            ◄ ► Стрелки на пульте: выбор • ▲ ▼ Вверх/Вниз: переключение опций • OK: подтвердить • Back: позже
           </div>
         </div>
       </div>
