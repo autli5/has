@@ -654,55 +654,78 @@ export default function Cinema({
 
   const [isPlayingState, setIsPlayingState] = useState(true);
 
-  // Dedicated multi-protocol command dispatcher to balancer iframes
-  const sendIframePlaybackCommand = useCallback((command: "play" | "pause" | "toggle") => {
+  // Robust multi-level recursive window broadcast to reach nested balancer iframes
+  const broadcastToWindowTree = useCallback((payload: any) => {
     const iframe = document.querySelector<HTMLIFrameElement>(".has-cinema-iframe-elem");
     if (!iframe || !iframe.contentWindow) return;
 
-    const win = iframe.contentWindow;
-
-    // Never focus iframe directly — focus must strictly remain on our app controls for TV remote
-
-    const post = (payload: any) => {
+    const send = (target: Window) => {
       try {
-        win.postMessage(payload, "*");
+        target.postMessage(payload, "*");
       } catch {}
       try {
-        win.postMessage(JSON.stringify(payload), "*");
+        if (typeof payload === "object") {
+          target.postMessage(JSON.stringify(payload), "*");
+        }
       } catch {}
     };
 
+    const rootWin = iframe.contentWindow;
+    send(rootWin);
+
+    // Broadcast down into subframes (VidLink, Alloha, Playerjs, AutoEmbed nested wrappers)
+    try {
+      if (rootWin.frames && rootWin.frames.length > 0) {
+        for (let i = 0; i < rootWin.frames.length; i++) {
+          try {
+            send(rootWin.frames[i]);
+            if (rootWin.frames[i].frames && rootWin.frames[i].frames.length > 0) {
+              for (let j = 0; j < rootWin.frames[i].frames.length; j++) {
+                try {
+                  send(rootWin.frames[i].frames[j]);
+                } catch {}
+              }
+            }
+          } catch {}
+        }
+      }
+    } catch {}
+  }, []);
+
+  // Dedicated multi-protocol command dispatcher to balancer iframes
+  const sendIframePlaybackCommand = useCallback((command: "play" | "pause" | "toggle") => {
     const isPlay = command === "play";
     const isToggle = command === "toggle";
 
     // 1. Kodik Player API (Supports both object and stringified commands)
-    post({ key: "kodik_player_api", value: { method: isToggle ? "toggle" : (isPlay ? "play" : "pause") } });
+    broadcastToWindowTree({ key: "kodik_player_api", value: { method: isToggle ? "toggle" : (isPlay ? "play" : "pause") } });
     if (!isToggle) {
-      post({ key: "kodik_player_api", value: { method: isPlay ? "play" : "pause" } });
+      broadcastToWindowTree({ key: "kodik_player_api", value: { method: isPlay ? "play" : "pause" } });
     }
 
     // 2. Playerjs API (Used by Alloha, Kinoplay, Collaps, VideoCDN, Ashdi, HDRezka)
-    post({ api: isToggle ? "toggle" : (isPlay ? "play" : "pause") });
+    broadcastToWindowTree({ api: isToggle ? "toggle" : (isPlay ? "play" : "pause") });
     if (!isToggle) {
-      post({ api: isPlay ? "play" : "pause" });
+      broadcastToWindowTree({ api: isPlay ? "play" : "pause" });
     }
 
     // 3. Alloha API
-    post({ action: isPlay ? "play" : "pause" });
-    post({ method: isPlay ? "play" : "pause" });
+    broadcastToWindowTree({ action: isPlay ? "play" : "pause" });
+    broadcastToWindowTree({ method: isPlay ? "play" : "pause" });
 
     // 4. VidLink Pro / Video.js API
-    post({ type: isPlay ? "PLAYER_PLAY" : "PLAYER_PAUSE" });
-    post({ type: isPlay ? "play" : "pause" });
-    post({ action: isPlay ? "play" : "pause" });
+    broadcastToWindowTree({ type: isPlay ? "PLAYER_PLAY" : "PLAYER_PAUSE" });
+    broadcastToWindowTree({ type: isPlay ? "play" : "pause" });
+    broadcastToWindowTree({ action: isPlay ? "play" : "pause" });
+    broadcastToWindowTree({ event: isPlay ? "play" : "pause" });
 
     // 5. YouTube / VidSrc / AutoEmbed HTML5 API
-    post({ event: "command", func: isPlay ? "playVideo" : "pauseVideo", args: "" });
+    broadcastToWindowTree({ event: "command", func: isPlay ? "playVideo" : "pauseVideo", args: "" });
 
     // 6. Generic HTML5 postMessage
-    post({ method: isPlay ? "play" : "pause" });
-    post({ command: isPlay ? "play" : "pause" });
-  }, []);
+    broadcastToWindowTree({ method: isPlay ? "play" : "pause" });
+    broadcastToWindowTree({ command: isPlay ? "play" : "pause" });
+  }, [broadcastToWindowTree]);
 
   const setPlayerVolumeMax = useCallback((showToast: boolean = false) => {
     // 1. Native HTML5 Video Element
@@ -713,58 +736,50 @@ export default function Cinema({
       } catch {}
     }
 
-    // 2. Iframe Players (Kodik, Alloha, Playerjs, VidLink, YouTube/AutoEmbed, etc.)
-    const iframe = document.querySelector<HTMLIFrameElement>(".has-cinema-iframe-elem");
-    if (iframe && iframe.contentWindow) {
-      const win = iframe.contentWindow;
-      const post = (payload: any) => {
-        try { win.postMessage(payload, "*"); } catch {}
-        try { win.postMessage(JSON.stringify(payload), "*"); } catch {}
-      };
+    // 2. Kodik API
+    broadcastToWindowTree({ key: "kodik_player_api", value: { method: "volume", volume: 1 } });
+    broadcastToWindowTree({ key: "kodik_player_api", value: { method: "volume", volume: 100 } });
+    broadcastToWindowTree({ key: "kodik_player_api", value: { method: "unmute" } });
 
-      // 1. Kodik API
-      post({ key: "kodik_player_api", value: { method: "volume", volume: 1 } });
-      post({ key: "kodik_player_api", value: { method: "volume", volume: 100 } });
-      post({ key: "kodik_player_api", value: { method: "unmute" } });
+    // 3. Playerjs API (Alloha, Kinoplay, Collaps, VideoCDN, Ashdi, HDRezka)
+    broadcastToWindowTree({ api: "volume", set: 100 });
+    broadcastToWindowTree({ api: "volume", set: 1 });
+    broadcastToWindowTree({ api: "volume", volume: 100 });
+    broadcastToWindowTree({ api: "volume", volume: 1 });
+    broadcastToWindowTree({ api: "unmute" });
 
-      // 2. Playerjs API (Alloha, Kinoplay, Collaps, VideoCDN, Ashdi, HDRezka)
-      post({ api: "volume", volume: 1 });
-      post({ api: "volume", volume: 100 });
-      post({ api: "volume", value: 100 });
-      post({ api: "unmute" });
+    // 4. Alloha API
+    broadcastToWindowTree({ action: "volume", volume: 1 });
+    broadcastToWindowTree({ action: "volume", value: 100 });
+    broadcastToWindowTree({ action: "volume", set: 100 });
+    broadcastToWindowTree({ action: "unmute" });
+    broadcastToWindowTree({ method: "volume", value: 1 });
+    broadcastToWindowTree({ method: "setVolume", value: 100 });
+    broadcastToWindowTree({ method: "unmute" });
 
-      // 3. Alloha API
-      post({ action: "volume", volume: 1 });
-      post({ action: "volume", value: 100 });
-      post({ action: "unmute" });
-      post({ method: "volume", value: 1 });
-      post({ method: "setVolume", value: 100 });
-      post({ method: "unmute" });
+    // 5. VidLink Pro / Video.js API
+    broadcastToWindowTree({ type: "VOLUME", volume: 1 });
+    broadcastToWindowTree({ type: "SET_VOLUME", data: { volume: 1 } });
+    broadcastToWindowTree({ type: "SET_VOLUME", data: { volume: 100 } });
+    broadcastToWindowTree({ type: "unmute" });
+    broadcastToWindowTree({ action: "volume", value: 1 });
+    broadcastToWindowTree({ action: "unmute" });
 
-      // 4. VidLink Pro / Video.js API
-      post({ type: "VOLUME", volume: 1 });
-      post({ type: "SET_VOLUME", data: { volume: 1 } });
-      post({ type: "SET_VOLUME", data: { volume: 100 } });
-      post({ type: "unmute" });
-      post({ action: "volume", value: 1 });
-      post({ action: "unmute" });
+    // 6. YouTube / VidSrc / AutoEmbed HTML5 API
+    broadcastToWindowTree({ event: "command", func: "setVolume", args: [100] });
+    broadcastToWindowTree({ event: "command", func: "unMute", args: "" });
 
-      // 5. YouTube / VidSrc / AutoEmbed HTML5 API
-      post({ event: "command", func: "setVolume", args: [100] });
-      post({ event: "command", func: "unMute", args: "" });
-
-      // 6. Generic HTML5 postMessage
-      post({ method: "setVolume", volume: 100 });
-      post({ method: "setVolume", value: 100 });
-      post({ method: "unmute" });
-      post({ command: "setVolume", volume: 100 });
-      post({ command: "unmute" });
-    }
+    // 7. Generic HTML5 postMessage
+    broadcastToWindowTree({ method: "setVolume", volume: 100 });
+    broadcastToWindowTree({ method: "setVolume", value: 100 });
+    broadcastToWindowTree({ method: "unmute" });
+    broadcastToWindowTree({ command: "setVolume", volume: 100 });
+    broadcastToWindowTree({ command: "unmute" });
 
     if (showToast) {
       showTvToast("Громкость плеера: 100%", "🔊", 1500);
     }
-  }, [showTvToast]);
+  }, [broadcastToWindowTree, showTvToast]);
 
   const triggerPlayerPlay = useCallback(() => {
     if (videoRef.current) {
@@ -775,6 +790,17 @@ export default function Cinema({
       videoRef.current.play().catch(() => {});
     } else {
       sendIframePlaybackCommand("play");
+      // Awaken iframe user activation without permanently trapping focus
+      const iframe = document.querySelector<HTMLIFrameElement>(".has-cinema-iframe-elem");
+      if (iframe) {
+        try {
+          iframe.focus();
+        } catch {}
+        setTimeout(() => {
+          const playBtn = document.querySelector<HTMLElement>(".has-cinema-player-ctrl-btn.primary");
+          if (playBtn) playBtn.focus();
+        }, 120);
+      }
     }
     setPlayerVolumeMax(false);
     setIsPlayingState(true);
@@ -804,8 +830,9 @@ export default function Cinema({
       } else {
         triggerPlayerPlay();
       }
+      sendIframePlaybackCommand("toggle");
     }
-  }, [isPlayingState, triggerPlayerPlay, triggerPlayerPause]);
+  }, [isPlayingState, triggerPlayerPlay, triggerPlayerPause, sendIframePlaybackCommand]);
 
   const triggerPlayerSeek = useCallback((secondsDelta: number) => {
     if (videoRef.current) {
@@ -815,53 +842,54 @@ export default function Cinema({
       );
       currentPlaybackRef.current.currentTime = videoRef.current.currentTime;
     } else {
-      const iframe = document.querySelector<HTMLIFrameElement>(".has-cinema-iframe-elem");
-      if (iframe && iframe.contentWindow) {
-        const win = iframe.contentWindow;
-        const post = (payload: any) => {
-          try { win.postMessage(payload, "*"); } catch {}
-          try { win.postMessage(JSON.stringify(payload), "*"); } catch {}
-        };
+      const curTime = currentPlaybackRef.current.currentTime || 0;
+      const targetTime = Math.max(0, curTime + secondsDelta);
+      currentPlaybackRef.current.currentTime = targetTime;
 
-        const curTime = currentPlaybackRef.current.currentTime || 0;
-        const targetTime = Math.max(0, curTime + secondsDelta);
-        currentPlaybackRef.current.currentTime = targetTime;
+      // 1. Kodik API (Seek to absolute seconds & relative seek delta)
+      broadcastToWindowTree({ key: "kodik_player_api", value: { method: "seek", time: targetTime } });
+      broadcastToWindowTree({ key: "kodik_player_api", value: { method: "seek_delta", time: secondsDelta } });
+      broadcastToWindowTree({ key: "kodik_player_api", value: { method: secondsDelta > 0 ? "forward" : "rewind", time: Math.abs(secondsDelta) } });
 
-        // 1. Kodik API (Seek to absolute seconds & relative seek delta)
-        post({ key: "kodik_player_api", value: { method: "seek", time: targetTime } });
-        post({ key: "kodik_player_api", value: { method: "seek_delta", time: secondsDelta } });
-        post({ key: "kodik_player_api", value: { method: secondsDelta > 0 ? "forward" : "rewind", time: Math.abs(secondsDelta) } });
+      // 2. Playerjs API (Used by Alloha, Kinoplay, Collaps, VideoCDN, Ashdi, HDRezka)
+      broadcastToWindowTree({ api: "seek", set: targetTime });
+      broadcastToWindowTree({ api: "seek", set: secondsDelta > 0 ? `+${secondsDelta}` : `${secondsDelta}` });
+      broadcastToWindowTree({ api: "seek", time: targetTime });
+      broadcastToWindowTree({ api: "seek", delta: secondsDelta });
+      broadcastToWindowTree({ api: "seek_delta", time: secondsDelta });
 
-        // 2. Playerjs API (Used by Alloha, Kinoplay, Collaps, VideoCDN, Ashdi, HDRezka)
-        post({ api: "seek", time: targetTime });
-        post({ api: "seek", delta: secondsDelta });
-        post({ api: "seek_delta", time: secondsDelta });
-        post({ api: "seek", time: secondsDelta > 0 ? `+${secondsDelta}` : `${secondsDelta}` });
+      // 3. Alloha API
+      broadcastToWindowTree({ action: "seek", time: targetTime });
+      broadcastToWindowTree({ action: "seek", delta: secondsDelta });
+      broadcastToWindowTree({ method: "seek", time: targetTime });
+      broadcastToWindowTree({ method: "seekTo", value: targetTime });
 
-        // 3. Alloha API
-        post({ action: "seek", time: targetTime });
-        post({ action: "seek", delta: secondsDelta });
-        post({ method: "seek", time: targetTime });
-        post({ method: "seekTo", value: targetTime });
+      // 4. VidLink Pro / Video.js API
+      broadcastToWindowTree({ type: "SEEK", data: { time: targetTime } });
+      broadcastToWindowTree({ type: "PLAYER_SEEK", time: targetTime });
+      broadcastToWindowTree({ type: "seek", time: targetTime });
+      broadcastToWindowTree({ action: "seek", time: targetTime });
+      broadcastToWindowTree({ action: "seek", delta: secondsDelta });
 
-        // 4. VidLink Pro / Video.js API
-        post({ type: "SEEK", data: { time: targetTime } });
-        post({ type: "PLAYER_SEEK", time: targetTime });
-        post({ type: "seek", time: targetTime });
-        post({ action: "seek", time: targetTime });
-        post({ action: "seek", delta: secondsDelta });
+      // 5. YouTube / VidSrc / AutoEmbed HTML5 API
+      broadcastToWindowTree({ event: "command", func: "seekTo", args: [targetTime, true] });
+      broadcastToWindowTree({ event: "command", func: "seek", args: [targetTime] });
+      broadcastToWindowTree({ action: "seekTo", value: targetTime });
 
-        // 5. YouTube / VidSrc / AutoEmbed HTML5 API
-        post({ event: "command", func: "seekTo", args: [targetTime, true] });
-        post({ event: "command", func: "seek", args: [targetTime] });
-        post({ action: "seekTo", value: targetTime });
-
-        // 6. Generic HTML5 postMessage
-        post({ method: "seek", time: targetTime });
-        post({ command: "seek", time: targetTime });
-      }
+      // 6. Generic HTML5 postMessage
+      broadcastToWindowTree({ method: "seek", time: targetTime });
+      broadcastToWindowTree({ command: "seek", time: targetTime });
     }
     showTvToast(secondsDelta > 0 ? `+${secondsDelta} сек` : `${secondsDelta} сек`, secondsDelta > 0 ? "⏩" : "⏪", 1000);
+  }, [broadcastToWindowTree, showTvToast]);
+
+  // Give TV remote control directly to iframe if a user needs to interact with in-player controls
+  const triggerIframeDirectFocus = useCallback(() => {
+    const iframe = document.querySelector<HTMLIFrameElement>(".has-cinema-iframe-elem");
+    if (iframe) {
+      iframe.focus();
+      showTvToast("Управление передано плееру. Нажмите [Back] на пульте для возврата в меню HAS", "🎮", 3000);
+    }
   }, [showTvToast]);
 
   // Universal helper to convert a TMDB item into CinemaMediaItem
@@ -1653,6 +1681,9 @@ export default function Cinema({
     setTimeout(() => {
       setPlayerVolumeMax(false);
     }, 2800);
+    setTimeout(() => {
+      setPlayerVolumeMax(false);
+    }, 4500);
   }, [sendIframePlaybackCommand, setPlayerVolumeMax]);
 
   // Start playback for a media item (movie or specific series episode)
@@ -1797,8 +1828,8 @@ export default function Cinema({
         .catch(() => {});
     }
 
-    // Search Kodik in background for anime or studio translations
-    searchKodikDubbings(media.original_title || media.title, isAnime);
+    // Search Kodik in background and auto-switch to clean stream if Russian dubbing is found
+    searchKodikDubbings(media.original_title || media.title, true);
   };
 
   // Card Click Action: Opens rich media details modal (DOES NOT start player immediately)
@@ -2244,193 +2275,212 @@ export default function Cinema({
           return;
         }
 
-        // 1.2 When HUD is HIDDEN:
-        if (!isHudVisible) {
-          // OK / Space / PlayPause: Toggle Play/Pause and show HUD
-          if (isOk || isPlayPause || e.code === "Space") {
+        // 1.1.1 If Settings or Episodes drawer is open in player:
+        if (showPlayerSettings || showPlayerEpisodes) {
+          if (isOk) {
+            const active = document.activeElement as HTMLElement | null;
+            if (
+              active &&
+              (active.tagName === "BUTTON" ||
+                active.getAttribute("role") === "button" ||
+                active.hasAttribute("data-tv-focusable"))
+            ) {
+              e.preventDefault();
+              playTvSelectBeep();
+              active.click();
+              return;
+            }
+          }
+          // Do NOT run HUD navigation! Skip HUD logic so spatial navigation below handles drawer chips and buttons!
+        } else {
+          // 1.2 When HUD is HIDDEN:
+          if (!isHudVisible) {
+            // OK / Space / PlayPause: Toggle Play/Pause and show HUD
+            if (isOk || isPlayPause || e.code === "Space") {
+              e.preventDefault();
+              triggerPlayerPlayPause();
+              setIsHudVisible(true);
+              setTimeout(() => {
+                const playBtn = document.querySelector<HTMLElement>(".has-cinema-player-ctrl-btn.primary");
+                if (playBtn) playBtn.focus();
+              }, 30);
+              return;
+            }
+
+            // Left Arrow: Rewind 10s
+            if (e.key === "ArrowLeft" || e.keyCode === 21 || e.keyCode === 37) {
+              e.preventDefault();
+              triggerPlayerSeek(-10);
+              return;
+            }
+
+            // Right Arrow: Forward 10s
+            if (e.key === "ArrowRight" || e.keyCode === 22 || e.keyCode === 39) {
+              e.preventDefault();
+              triggerPlayerSeek(10);
+              return;
+            }
+
+            // Up Arrow: Reveal HUD and focus Back button
+            if (e.key === "ArrowUp" || e.keyCode === 19 || e.keyCode === 38) {
+              e.preventDefault();
+              setIsHudVisible(true);
+              setTimeout(() => {
+                const backBtn = document.querySelector<HTMLElement>(".has-cinema-player-btn-back");
+                if (backBtn) backBtn.focus();
+              }, 30);
+              return;
+            }
+
+            // Down Arrow: Reveal HUD and focus Play/Pause button
+            if (e.key === "ArrowDown" || e.keyCode === 20 || e.keyCode === 40) {
+              e.preventDefault();
+              setIsHudVisible(true);
+              setTimeout(() => {
+                const playBtn = document.querySelector<HTMLElement>(".has-cinema-player-ctrl-btn.primary");
+                if (playBtn) playBtn.focus();
+              }, 30);
+              return;
+            }
+          }
+
+          // 1.3 When HUD is VISIBLE:
+          // OK / Space button
+          if (isOk) {
+            const active = document.activeElement as HTMLElement | null;
+            const isButtonFocused =
+              active &&
+              (active.tagName === "BUTTON" ||
+                active.getAttribute("role") === "button" ||
+                active.hasAttribute("data-tv-focusable"));
+
+            if (isButtonFocused && active) {
+              e.preventDefault();
+              playTvSelectBeep();
+              active.click();
+              return;
+            }
+
             e.preventDefault();
             triggerPlayerPlayPause();
-            setIsHudVisible(true);
-            setTimeout(() => {
-              const playBtn = document.querySelector<HTMLElement>(".has-cinema-player-ctrl-btn.primary");
-              if (playBtn) playBtn.focus();
-            }, 30);
             return;
           }
 
-          // Left Arrow: Rewind 10s
-          if (e.key === "ArrowLeft" || e.keyCode === 21 || e.keyCode === 37) {
+          if (isPlayPause || (e.code === "Space" && !isInput)) {
             e.preventDefault();
-            triggerPlayerSeek(-10);
+            triggerPlayerPlayPause();
             return;
           }
 
-          // Right Arrow: Forward 10s
-          if (e.key === "ArrowRight" || e.keyCode === 22 || e.keyCode === 39) {
+          if (isFastForward) {
             e.preventDefault();
             triggerPlayerSeek(10);
             return;
           }
 
-          // Up Arrow: Reveal HUD and focus Back button
-          if (e.key === "ArrowUp" || e.keyCode === 19 || e.keyCode === 38) {
+          if (isRewind) {
             e.preventDefault();
-            setIsHudVisible(true);
-            setTimeout(() => {
-              const backBtn = document.querySelector<HTMLElement>(".has-cinema-player-btn-back");
-              if (backBtn) backBtn.focus();
-            }, 30);
+            triggerPlayerSeek(-10);
             return;
           }
 
-          // Down Arrow: Reveal HUD and focus Play/Pause button
-          if (e.key === "ArrowDown" || e.keyCode === 20 || e.keyCode === 40) {
-            e.preventDefault();
-            setIsHudVisible(true);
-            setTimeout(() => {
-              const playBtn = document.querySelector<HTMLElement>(".has-cinema-player-ctrl-btn.primary");
-              if (playBtn) playBtn.focus();
-            }, 30);
-            return;
-          }
-        }
-
-        // 1.3 When HUD is VISIBLE:
-        // OK / Space button
-        if (isOk) {
+          // Two-row deterministic navigation within Player HUD:
           const active = document.activeElement as HTMLElement | null;
-          const isButtonFocused =
-            active &&
-            (active.tagName === "BUTTON" ||
-              active.getAttribute("role") === "button" ||
-              active.hasAttribute("data-tv-focusable"));
+          const topRowButtons = Array.from(
+            document.querySelectorAll<HTMLElement>('.has-cinema-player-top-hud [data-tv-row="top"]')
+          ).filter((b) => b.offsetParent !== null);
+          const bottomRowButtons = Array.from(
+            document.querySelectorAll<HTMLElement>('.has-cinema-player-bottom-hud [data-tv-row="bottom"]')
+          ).filter((b) => b.offsetParent !== null);
 
-          if (isButtonFocused && active) {
-            e.preventDefault();
-            playTvSelectBeep();
-            active.click();
-            return;
-          }
+          const currentTopIndex = topRowButtons.indexOf(active as any);
+          const currentBottomIndex = bottomRowButtons.indexOf(active as any);
+          const isTopRow = currentTopIndex !== -1;
+          const isBottomRow = currentBottomIndex !== -1;
 
-          e.preventDefault();
-          triggerPlayerPlayPause();
-          return;
-        }
-
-        if (isPlayPause || (e.code === "Space" && !isInput)) {
-          e.preventDefault();
-          triggerPlayerPlayPause();
-          return;
-        }
-
-        if (isFastForward) {
-          e.preventDefault();
-          triggerPlayerSeek(10);
-          return;
-        }
-
-        if (isRewind) {
-          e.preventDefault();
-          triggerPlayerSeek(-10);
-          return;
-        }
-
-        // Two-row deterministic navigation within Player HUD:
-        const active = document.activeElement as HTMLElement | null;
-        const topRowButtons = Array.from(
-          document.querySelectorAll<HTMLElement>('.has-cinema-player-top-hud [data-tv-row="top"]')
-        ).filter((b) => b.offsetParent !== null);
-        const bottomRowButtons = Array.from(
-          document.querySelectorAll<HTMLElement>('.has-cinema-player-bottom-hud [data-tv-row="bottom"]')
-        ).filter((b) => b.offsetParent !== null);
-
-        const currentTopIndex = topRowButtons.indexOf(active as any);
-        const currentBottomIndex = bottomRowButtons.indexOf(active as any);
-        const isTopRow = currentTopIndex !== -1;
-        const isBottomRow = currentBottomIndex !== -1;
-
-        // If focus was lost, any arrow immediately recovers focus to primary Play/Pause button
-        if (!isTopRow && !isBottomRow) {
-          if (
-            e.key === "ArrowUp" || e.keyCode === 19 || e.keyCode === 38 ||
-            e.key === "ArrowDown" || e.keyCode === 20 || e.keyCode === 40 ||
-            e.key === "ArrowLeft" || e.keyCode === 21 || e.keyCode === 37 ||
-            e.key === "ArrowRight" || e.keyCode === 22 || e.keyCode === 39
-          ) {
-            e.preventDefault();
-            const target =
-              e.key === "ArrowUp"
-                ? (topRowButtons[0] || document.querySelector<HTMLElement>(".has-cinema-player-btn-back"))
-                : (document.querySelector<HTMLElement>(".has-cinema-player-ctrl-btn.primary") || bottomRowButtons[0]);
-            if (target) {
-              target.focus();
-              playTvNavBeep();
+          // If focus was lost, any arrow immediately recovers focus to primary Play/Pause button
+          if (!isTopRow && !isBottomRow) {
+            if (
+              e.key === "ArrowUp" || e.keyCode === 19 || e.keyCode === 38 ||
+              e.key === "ArrowDown" || e.keyCode === 20 || e.keyCode === 40 ||
+              e.key === "ArrowLeft" || e.keyCode === 21 || e.keyCode === 37 ||
+              e.key === "ArrowRight" || e.keyCode === 22 || e.keyCode === 39
+            ) {
+              e.preventDefault();
+              const target =
+                e.key === "ArrowUp"
+                  ? (topRowButtons[0] || document.querySelector<HTMLElement>(".has-cinema-player-btn-back"))
+                  : (document.querySelector<HTMLElement>(".has-cinema-player-ctrl-btn.primary") || bottomRowButtons[0]);
+              if (target) {
+                target.focus();
+                playTvNavBeep();
+              }
+              return;
             }
-            return;
           }
-        }
 
-        // Horizontal & vertical navigation inside Top Row
-        if (isTopRow) {
-          if (e.key === "ArrowRight" || e.keyCode === 22 || e.keyCode === 39) {
-            e.preventDefault();
-            const nextIdx = Math.min(topRowButtons.length - 1, currentTopIndex + 1);
-            topRowButtons[nextIdx]?.focus();
-            playTvNavBeep();
-            return;
-          }
-          if (e.key === "ArrowLeft" || e.keyCode === 21 || e.keyCode === 37) {
-            e.preventDefault();
-            const prevIdx = Math.max(0, currentTopIndex - 1);
-            topRowButtons[prevIdx]?.focus();
-            playTvNavBeep();
-            return;
-          }
-          if (e.key === "ArrowDown" || e.keyCode === 20 || e.keyCode === 40) {
-            e.preventDefault();
-            const bottomTarget =
-              document.querySelector<HTMLElement>(".has-cinema-player-ctrl-btn.primary") ||
-              bottomRowButtons[0];
-            if (bottomTarget) {
-              bottomTarget.focus();
+          // Horizontal & vertical navigation inside Top Row
+          if (isTopRow) {
+            if (e.key === "ArrowRight" || e.keyCode === 22 || e.keyCode === 39) {
+              e.preventDefault();
+              const nextIdx = Math.min(topRowButtons.length - 1, currentTopIndex + 1);
+              topRowButtons[nextIdx]?.focus();
               playTvNavBeep();
+              return;
             }
-            return;
+            if (e.key === "ArrowLeft" || e.keyCode === 21 || e.keyCode === 37) {
+              e.preventDefault();
+              const prevIdx = Math.max(0, currentTopIndex - 1);
+              topRowButtons[prevIdx]?.focus();
+              playTvNavBeep();
+              return;
+            }
+            if (e.key === "ArrowDown" || e.keyCode === 20 || e.keyCode === 40) {
+              e.preventDefault();
+              const bottomTarget =
+                document.querySelector<HTMLElement>(".has-cinema-player-ctrl-btn.primary") ||
+                bottomRowButtons[0];
+              if (bottomTarget) {
+                bottomTarget.focus();
+                playTvNavBeep();
+              }
+              return;
+            }
           }
-        }
 
-        // Horizontal & vertical navigation inside Bottom Row
-        if (isBottomRow) {
-          if (e.key === "ArrowRight" || e.keyCode === 22 || e.keyCode === 39) {
-            e.preventDefault();
-            const nextIdx = Math.min(bottomRowButtons.length - 1, currentBottomIndex + 1);
-            bottomRowButtons[nextIdx]?.focus();
-            playTvNavBeep();
-            return;
-          }
-          if (e.key === "ArrowLeft" || e.keyCode === 21 || e.keyCode === 37) {
-            e.preventDefault();
-            const prevIdx = Math.max(0, currentBottomIndex - 1);
-            bottomRowButtons[prevIdx]?.focus();
-            playTvNavBeep();
-            return;
-          }
-          if (e.key === "ArrowUp" || e.keyCode === 19 || e.keyCode === 38) {
-            e.preventDefault();
-            const isRightSide = currentBottomIndex >= Math.floor(bottomRowButtons.length / 2);
-            const topTarget = isRightSide
-              ? (document.querySelector<HTMLElement>(".has-cinema-player-hud-btn") || topRowButtons[topRowButtons.length - 1])
-              : (document.querySelector<HTMLElement>(".has-cinema-player-btn-back") || topRowButtons[0]);
-            if (topTarget) {
-              topTarget.focus();
+          // Horizontal & vertical navigation inside Bottom Row
+          if (isBottomRow) {
+            if (e.key === "ArrowRight" || e.keyCode === 22 || e.keyCode === 39) {
+              e.preventDefault();
+              const nextIdx = Math.min(bottomRowButtons.length - 1, currentBottomIndex + 1);
+              bottomRowButtons[nextIdx]?.focus();
               playTvNavBeep();
+              return;
             }
-            return;
-          }
-          if (e.key === "ArrowDown" || e.keyCode === 20 || e.keyCode === 40) {
-            e.preventDefault();
-            setIsHudVisible(false);
-            return;
+            if (e.key === "ArrowLeft" || e.keyCode === 21 || e.keyCode === 37) {
+              e.preventDefault();
+              const prevIdx = Math.max(0, currentBottomIndex - 1);
+              bottomRowButtons[prevIdx]?.focus();
+              playTvNavBeep();
+              return;
+            }
+            if (e.key === "ArrowUp" || e.keyCode === 19 || e.keyCode === 38) {
+              e.preventDefault();
+              const isRightSide = currentBottomIndex >= Math.floor(bottomRowButtons.length / 2);
+              const topTarget = isRightSide
+                ? (document.querySelector<HTMLElement>(".has-cinema-player-hud-btn") || topRowButtons[topRowButtons.length - 1])
+                : (document.querySelector<HTMLElement>(".has-cinema-player-btn-back") || topRowButtons[0]);
+              if (topTarget) {
+                topTarget.focus();
+                playTvNavBeep();
+              }
+              return;
+            }
+            if (e.key === "ArrowDown" || e.keyCode === 20 || e.keyCode === 40) {
+              e.preventDefault();
+              setIsHudVisible(false);
+              return;
+            }
           }
         }
       }
@@ -2804,14 +2854,35 @@ export default function Cinema({
   useEffect(() => {
     if (showPlayerSettings) {
       const t = setTimeout(() => {
-        const firstFocus = document.querySelector<HTMLElement>(
-          ".has-cinema-player-settings-sheet [data-tv-focusable='true']"
-        );
-        if (firstFocus) firstFocus.focus();
-      }, 50);
+        const firstFocus =
+          document.querySelector<HTMLElement>(".has-cinema-player-settings-sheet .has-cinema-drawer-chip") ||
+          document.querySelector<HTMLElement>(".has-cinema-player-settings-sheet .has-cinema-drawer-option-btn") ||
+          document.querySelector<HTMLElement>(".has-cinema-player-settings-sheet [data-tv-focusable='true']");
+        if (firstFocus) {
+          firstFocus.focus();
+          playTvBeep(640, 0.025);
+        }
+      }, 60);
       return () => clearTimeout(t);
     }
-  }, [showPlayerSettings]);
+  }, [showPlayerSettings, playTvBeep]);
+
+  // Auto-focus current or first episode when episodes drawer opens
+  useEffect(() => {
+    if (showPlayerEpisodes) {
+      const t = setTimeout(() => {
+        const targetEp =
+          document.querySelector<HTMLElement>(".has-cinema-player-episodes-sheet .has-cinema-drawer-chip.active") ||
+          document.querySelector<HTMLElement>(".has-cinema-player-episodes-sheet .has-cinema-drawer-chip") ||
+          document.querySelector<HTMLElement>(".has-cinema-player-episodes-sheet [data-tv-focusable='true']");
+        if (targetEp) {
+          targetEp.focus();
+          playTvBeep(640, 0.025);
+        }
+      }, 60);
+      return () => clearTimeout(t);
+    }
+  }, [showPlayerEpisodes, playTvBeep]);
 
   // Handle Android TV hardware back & browser popstate for details modal
   useEffect(() => {
@@ -4949,6 +5020,54 @@ export default function Cinema({
                     <div className="has-cinema-drawer-chips-wrap">
                       <button
                         type="button"
+                        className="has-cinema-drawer-chip primary"
+                        onClick={() => {
+                          triggerPlayerPlayPause();
+                          setShowPlayerSettings(false);
+                        }}
+                        data-tv-focusable="true"
+                        title="Воспроизведение / Пауза"
+                      >
+                        {isPlayingState ? "⏸ Пауза" : "▶ Воспроизведение"}
+                      </button>
+                      <button
+                        type="button"
+                        className="has-cinema-drawer-chip"
+                        onClick={() => {
+                          triggerPlayerSeek(-10);
+                          setShowPlayerSettings(false);
+                        }}
+                        data-tv-focusable="true"
+                        title="Перемотать на 10 секунд назад"
+                      >
+                        ⏪ -10с
+                      </button>
+                      <button
+                        type="button"
+                        className="has-cinema-drawer-chip"
+                        onClick={() => {
+                          triggerPlayerSeek(10);
+                          setShowPlayerSettings(false);
+                        }}
+                        data-tv-focusable="true"
+                        title="Перемотать на 10 секунд вперед"
+                      >
+                        ⏩ +10с
+                      </button>
+                      <button
+                        type="button"
+                        className="has-cinema-drawer-chip"
+                        onClick={() => {
+                          setPlayerVolumeMax(true);
+                          setShowPlayerSettings(false);
+                        }}
+                        data-tv-focusable="true"
+                        title="Выставить громкость плеера на максимум (100%)"
+                      >
+                        🔊 Громкость 100%
+                      </button>
+                      <button
+                        type="button"
                         className="has-cinema-drawer-chip"
                         onClick={() => {
                           triggerPlayerSeek(20);
@@ -4957,7 +5076,7 @@ export default function Cinema({
                         data-tv-focusable="true"
                         title="Перемотать заставку на 20 секунд вперед"
                       >
-                        ⏩ Пропуск рекламы / заставки (+20с)
+                        ⏩ Пропуск рекламы (+20с)
                       </button>
                       <button
                         type="button"
@@ -4975,13 +5094,13 @@ export default function Cinema({
                         type="button"
                         className="has-cinema-drawer-chip"
                         onClick={() => {
-                          setPlayerVolumeMax(true);
+                          triggerIframeDirectFocus();
                           setShowPlayerSettings(false);
                         }}
                         data-tv-focusable="true"
-                        title="Выставить громкость плеера на максимум (100%)"
+                        title="Передать управление с пульта напрямую в плеер"
                       >
-                        🔊 Громкость 100%
+                        🎮 Управление в плеере
                       </button>
                       <button
                         type="button"
