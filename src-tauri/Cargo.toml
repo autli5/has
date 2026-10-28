@@ -1,6 +1,6 @@
 [package]
 name = "has"
-version = "0.0.13"
+version = "0.0.14"
 description = "has"
 authors = ["autli"]
 edition = "2024"

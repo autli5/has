@@ -661,11 +661,7 @@ export default function Cinema({
 
     const win = iframe.contentWindow;
 
-    // Focus iframe element & contentWindow so remote/keyboard events route into it
-    try {
-      iframe.focus();
-      win.focus();
-    } catch {}
+    // Never focus iframe directly — focus must strictly remain on our app controls for TV remote
 
     const post = (payload: any) => {
       try {
@@ -706,14 +702,6 @@ export default function Cinema({
     // 6. Generic HTML5 postMessage
     post({ method: isPlay ? "play" : "pause" });
     post({ command: isPlay ? "play" : "pause" });
-
-    // 7. Spacebar / K keyboard event simulation into iframe
-    try {
-      const spaceDown = new KeyboardEvent("keydown", { key: " ", code: "Space", keyCode: 32, which: 32, bubbles: true });
-      iframe.dispatchEvent(spaceDown);
-      const kDown = new KeyboardEvent("keydown", { key: "k", code: "KeyK", keyCode: 75, which: 75, bubbles: true });
-      iframe.dispatchEvent(kDown);
-    } catch {}
   }, []);
 
   const triggerPlayerPlay = useCallback(() => {
@@ -758,6 +746,7 @@ export default function Cinema({
         0,
         Math.min(videoRef.current.duration || 999999, videoRef.current.currentTime + secondsDelta)
       );
+      currentPlaybackRef.current.currentTime = videoRef.current.currentTime;
     } else {
       const iframe = document.querySelector<HTMLIFrameElement>(".has-cinema-iframe-elem");
       if (iframe && iframe.contentWindow) {
@@ -766,11 +755,43 @@ export default function Cinema({
           try { win.postMessage(payload, "*"); } catch {}
           try { win.postMessage(JSON.stringify(payload), "*"); } catch {}
         };
+
+        const curTime = currentPlaybackRef.current.currentTime || 0;
+        const targetTime = Math.max(0, curTime + secondsDelta);
+        currentPlaybackRef.current.currentTime = targetTime;
+
+        // 1. Kodik API (Seek to absolute seconds & relative seek delta)
+        post({ key: "kodik_player_api", value: { method: "seek", time: targetTime } });
         post({ key: "kodik_player_api", value: { method: "seek_delta", time: secondsDelta } });
+        post({ key: "kodik_player_api", value: { method: secondsDelta > 0 ? "forward" : "rewind", time: Math.abs(secondsDelta) } });
+
+        // 2. Playerjs API (Used by Alloha, Kinoplay, Collaps, VideoCDN, Ashdi, HDRezka)
+        post({ api: "seek", time: targetTime });
         post({ api: "seek", delta: secondsDelta });
         post({ api: "seek_delta", time: secondsDelta });
-        post({ type: "SEEK_DELTA", delta: secondsDelta });
-        post({ event: "command", func: "seekTo", args: [Math.max(0, currentPlaybackRef.current.currentTime + secondsDelta), true] });
+        post({ api: "seek", time: secondsDelta > 0 ? `+${secondsDelta}` : `${secondsDelta}` });
+
+        // 3. Alloha API
+        post({ action: "seek", time: targetTime });
+        post({ action: "seek", delta: secondsDelta });
+        post({ method: "seek", time: targetTime });
+        post({ method: "seekTo", value: targetTime });
+
+        // 4. VidLink Pro / Video.js API
+        post({ type: "SEEK", data: { time: targetTime } });
+        post({ type: "PLAYER_SEEK", time: targetTime });
+        post({ type: "seek", time: targetTime });
+        post({ action: "seek", time: targetTime });
+        post({ action: "seek", delta: secondsDelta });
+
+        // 5. YouTube / VidSrc / AutoEmbed HTML5 API
+        post({ event: "command", func: "seekTo", args: [targetTime, true] });
+        post({ event: "command", func: "seek", args: [targetTime] });
+        post({ action: "seekTo", value: targetTime });
+
+        // 6. Generic HTML5 postMessage
+        post({ method: "seek", time: targetTime });
+        post({ command: "seek", time: targetTime });
       }
     }
     showTvToast(secondsDelta > 0 ? `+${secondsDelta} сек` : `${secondsDelta} сек`, secondsDelta > 0 ? "⏩" : "⏪", 1000);
@@ -2231,37 +2252,99 @@ export default function Cinema({
           return;
         }
 
-        // Two-row navigation within Player HUD:
+        // Two-row deterministic navigation within Player HUD:
         const active = document.activeElement as HTMLElement | null;
-        const isTopRow = active?.getAttribute("data-tv-row") === "top";
-        const isBottomRow = active?.getAttribute("data-tv-row") === "bottom";
+        const topRowButtons = Array.from(
+          document.querySelectorAll<HTMLElement>('.has-cinema-player-top-hud [data-tv-row="top"]')
+        ).filter((b) => b.offsetParent !== null);
+        const bottomRowButtons = Array.from(
+          document.querySelectorAll<HTMLElement>('.has-cinema-player-bottom-hud [data-tv-row="bottom"]')
+        ).filter((b) => b.offsetParent !== null);
 
-        if (e.key === "ArrowUp" || e.keyCode === 19 || e.keyCode === 38) {
-          if (isBottomRow) {
+        const currentTopIndex = topRowButtons.indexOf(active as any);
+        const currentBottomIndex = bottomRowButtons.indexOf(active as any);
+        const isTopRow = currentTopIndex !== -1;
+        const isBottomRow = currentBottomIndex !== -1;
+
+        // If focus was lost, any arrow immediately recovers focus to primary Play/Pause button
+        if (!isTopRow && !isBottomRow) {
+          if (
+            e.key === "ArrowUp" || e.keyCode === 19 || e.keyCode === 38 ||
+            e.key === "ArrowDown" || e.keyCode === 20 || e.keyCode === 40 ||
+            e.key === "ArrowLeft" || e.keyCode === 21 || e.keyCode === 37 ||
+            e.key === "ArrowRight" || e.keyCode === 22 || e.keyCode === 39
+          ) {
             e.preventDefault();
-            const topTarget =
-              document.querySelector<HTMLElement>(".has-cinema-player-btn-back") ||
-              document.querySelector<HTMLElement>('[data-tv-row="top"]');
-            if (topTarget) {
-              topTarget.focus();
+            const target =
+              e.key === "ArrowUp"
+                ? (topRowButtons[0] || document.querySelector<HTMLElement>(".has-cinema-player-btn-back"))
+                : (document.querySelector<HTMLElement>(".has-cinema-player-ctrl-btn.primary") || bottomRowButtons[0]);
+            if (target) {
+              target.focus();
               playTvNavBeep();
             }
             return;
           }
         }
 
-        if (e.key === "ArrowDown" || e.keyCode === 20 || e.keyCode === 40) {
-          if (isTopRow) {
+        // Horizontal & vertical navigation inside Top Row
+        if (isTopRow) {
+          if (e.key === "ArrowRight" || e.keyCode === 22 || e.keyCode === 39) {
+            e.preventDefault();
+            const nextIdx = Math.min(topRowButtons.length - 1, currentTopIndex + 1);
+            topRowButtons[nextIdx]?.focus();
+            playTvNavBeep();
+            return;
+          }
+          if (e.key === "ArrowLeft" || e.keyCode === 21 || e.keyCode === 37) {
+            e.preventDefault();
+            const prevIdx = Math.max(0, currentTopIndex - 1);
+            topRowButtons[prevIdx]?.focus();
+            playTvNavBeep();
+            return;
+          }
+          if (e.key === "ArrowDown" || e.keyCode === 20 || e.keyCode === 40) {
             e.preventDefault();
             const bottomTarget =
               document.querySelector<HTMLElement>(".has-cinema-player-ctrl-btn.primary") ||
-              document.querySelector<HTMLElement>('[data-tv-row="bottom"]');
+              bottomRowButtons[0];
             if (bottomTarget) {
               bottomTarget.focus();
               playTvNavBeep();
             }
             return;
-          } else if (isBottomRow) {
+          }
+        }
+
+        // Horizontal & vertical navigation inside Bottom Row
+        if (isBottomRow) {
+          if (e.key === "ArrowRight" || e.keyCode === 22 || e.keyCode === 39) {
+            e.preventDefault();
+            const nextIdx = Math.min(bottomRowButtons.length - 1, currentBottomIndex + 1);
+            bottomRowButtons[nextIdx]?.focus();
+            playTvNavBeep();
+            return;
+          }
+          if (e.key === "ArrowLeft" || e.keyCode === 21 || e.keyCode === 37) {
+            e.preventDefault();
+            const prevIdx = Math.max(0, currentBottomIndex - 1);
+            bottomRowButtons[prevIdx]?.focus();
+            playTvNavBeep();
+            return;
+          }
+          if (e.key === "ArrowUp" || e.keyCode === 19 || e.keyCode === 38) {
+            e.preventDefault();
+            const isRightSide = currentBottomIndex >= Math.floor(bottomRowButtons.length / 2);
+            const topTarget = isRightSide
+              ? (document.querySelector<HTMLElement>(".has-cinema-player-hud-btn") || topRowButtons[topRowButtons.length - 1])
+              : (document.querySelector<HTMLElement>(".has-cinema-player-btn-back") || topRowButtons[0]);
+            if (topTarget) {
+              topTarget.focus();
+              playTvNavBeep();
+            }
+            return;
+          }
+          if (e.key === "ArrowDown" || e.keyCode === 20 || e.keyCode === 40) {
             e.preventDefault();
             setIsHudVisible(false);
             return;
@@ -2583,6 +2666,29 @@ export default function Cinema({
       window.removeEventListener("keydown", handleRemoteKeyDown);
     };
   }, [handleRemoteKeyDown]);
+
+  // Guard TV remote focus: Never let iframe capture or trap remote control keys
+  useEffect(() => {
+    if (playingEpisode !== null) {
+      const handleWindowBlur = () => {
+        setTimeout(() => {
+          if (document.activeElement?.tagName === "IFRAME") {
+            (document.activeElement as HTMLElement).blur();
+          }
+          window.focus();
+          const target =
+            document.querySelector<HTMLElement>(".has-cinema-player-ctrl-btn.primary") ||
+            document.querySelector<HTMLElement>(".has-cinema-player-btn-back");
+          if (target) {
+            target.focus();
+          }
+        }, 30);
+      };
+
+      window.addEventListener("blur", handleWindowBlur);
+      return () => window.removeEventListener("blur", handleWindowBlur);
+    }
+  }, [playingEpisode]);
 
   // Handle Android TV hardware back & browser popstate to guarantee return to movie details card
   useEffect(() => {
@@ -4702,7 +4808,7 @@ export default function Cinema({
                 allow="autoplay *; fullscreen *; encrypted-media *; picture-in-picture *; clipboard-write *"
                 referrerPolicy="no-referrer-when-downgrade"
                 allowFullScreen
-                tabIndex={0}
+                tabIndex={-1}
                 onLoad={handleIframeLoaded}
                 onError={() => handleAutoSwitchNextMirror("Сервер вернул ошибку")}
                 {...{ webkitallowfullscreen: "true", mozallowfullscreen: "true" }}
