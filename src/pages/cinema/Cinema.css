@@ -870,60 +870,92 @@
   transform: scale(1.06);
 }
 
-/* Bottom failover floating helper */
-.has-cinema-player-bottom-failover {
+/* Leanback Bottom Playback Controls Bar */
+.has-cinema-player-bottom-hud {
   position: absolute;
-  bottom: 24px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 999;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 1000;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 12px;
-  background: rgba(15, 23, 42, 0.88);
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  backdrop-filter: blur(16px);
-  padding: 8px 18px;
-  border-radius: 9999px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
-  transition: opacity 0.3s ease, transform 0.3s ease;
-  pointer-events: auto;
+  justify-content: center;
+  padding: 24px 30px calc(env(safe-area-inset-bottom, 0px) + 24px);
+  background: linear-gradient(0deg, rgba(6, 9, 18, 0.96) 0%, rgba(6, 9, 18, 0.75) 60%, transparent 100%);
+  pointer-events: none;
+  transition: opacity 0.3s cubic-bezier(0.16, 1, 0.3, 1), transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  transform: translateY(0);
+  opacity: 1;
 }
 
-.has-cinema-player-bottom-failover.hud-hidden {
+.has-cinema-player-bottom-hud.hud-hidden {
   opacity: 0;
-  transform: translateX(-50%) translateY(20px);
+  visibility: hidden;
+  transform: translateY(20px);
   pointer-events: none;
 }
 
-.failover-hint {
-  font-size: 12.5px;
-  color: #94a3b8;
-  font-weight: 500;
+.has-cinema-player-controls-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  pointer-events: auto !important;
 }
 
-.failover-btn {
-  background: linear-gradient(135deg, #3b82f6 0%, #6366f1 100%);
-  border: none;
+.has-cinema-player-ctrl-btn {
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.22);
   color: #ffffff;
-  padding: 6px 14px;
+  padding: 10px 20px;
   border-radius: 9999px;
-  font-size: 12px;
-  font-weight: 700;
+  font-size: 14px;
+  font-weight: 600;
   cursor: pointer;
-  transition: transform 0.18s ease, box-shadow 0.18s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  backdrop-filter: blur(14px);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.failover-btn:hover {
-  transform: scale(1.05);
-  box-shadow: 0 0 16px rgba(59, 130, 246, 0.6);
-}
-
-.failover-btn:focus-visible,
-.failover-btn[data-tv-focused="true"] {
-  outline: none;
-  box-shadow: 0 0 0 3px #ffffff, 0 0 20px #3b82f6;
+.has-cinema-player-ctrl-btn:hover,
+.has-cinema-player-ctrl-btn:focus-visible,
+.has-cinema-player-ctrl-btn:focus {
+  background: rgba(255, 255, 255, 0.25) !important;
+  border-color: #818cf8 !important;
+  outline: 3px solid #818cf8 !important;
+  box-shadow: 0 0 20px rgba(129, 140, 248, 0.8) !important;
   transform: scale(1.08);
+}
+
+.has-cinema-player-ctrl-btn.primary {
+  background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+  border-color: #818cf8;
+  padding: 12px 28px;
+  font-size: 15px;
+  font-weight: 700;
+  box-shadow: 0 4px 20px rgba(99, 102, 241, 0.5);
+}
+
+.has-cinema-player-ctrl-btn.primary:hover,
+.has-cinema-player-ctrl-btn.primary:focus {
+  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%) !important;
+  box-shadow: 0 0 25px rgba(129, 140, 248, 0.95) !important;
+  transform: scale(1.1);
+}
+
+.has-cinema-player-ctrl-btn.secondary {
+  background: rgba(30, 41, 59, 0.7);
+  border-color: rgba(148, 163, 184, 0.3);
+  color: #cbd5e1;
+}
+
+.has-cinema-player-ctrl-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
 }
 
 .has-cinema-mirror-connecting-banner {
@@ -1323,6 +1355,21 @@
 .has-cinema-drawer-btn-primary:hover {
   transform: translateY(-1px);
   box-shadow: 0 6px 20px rgba(79, 70, 229, 0.6);
+}
+
+.has-cinema-drawer-option-btn:focus,
+.has-cinema-drawer-option-btn:focus-visible,
+.has-cinema-drawer-chip:focus,
+.has-cinema-drawer-chip:focus-visible,
+.has-cinema-drawer-ep-btn:focus,
+.has-cinema-drawer-ep-btn:focus-visible,
+.has-cinema-drawer-btn-primary:focus,
+.has-cinema-drawer-btn-secondary:focus,
+.has-cinema-drawer-close-btn:focus {
+  outline: 3px solid #818cf8 !important;
+  outline-offset: 2px !important;
+  box-shadow: 0 0 16px rgba(99, 102, 241, 0.6) !important;
+  transform: scale(1.03) !important;
 }
 
 /* Episodes Grid Drawer (Series only) */
@@ -2254,6 +2301,91 @@
 /* Navigation is completely invisible on cinema screen (summoned by pressing Left from edge) */
 .has-tv-mode .has-cinema-header {
   display: none !important;
+}
+
+/* Sleek Leanback TV Top Navigation Bar */
+.has-cinema-tv-top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 40px;
+  background: rgba(10, 15, 30, 0.92);
+  backdrop-filter: blur(24px);
+  border-bottom: 1px solid rgba(129, 140, 248, 0.25);
+  margin-bottom: 8px;
+  position: relative;
+  z-index: 100;
+}
+
+.has-cinema-tv-top-brand {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.has-cinema-tv-menu-btn {
+  background: rgba(99, 102, 241, 0.22);
+  border: 1px solid rgba(129, 140, 248, 0.45);
+  color: #ffffff;
+  padding: 8px 18px;
+  border-radius: 9999px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.has-cinema-tv-menu-btn:hover,
+.has-cinema-tv-menu-btn:focus,
+.has-cinema-tv-menu-btn:focus-visible {
+  background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+  border-color: #ffffff;
+  outline: 3px solid #818cf8 !important;
+  box-shadow: 0 0 20px rgba(129, 140, 248, 0.85) !important;
+  transform: scale(1.05);
+}
+
+.has-cinema-tv-brand-title {
+  font-size: 16px;
+  font-weight: 800;
+  color: #f1f5f9;
+  letter-spacing: 0.5px;
+}
+
+.has-cinema-tv-top-tabs {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.has-cinema-tv-tab-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: #94a3b8;
+  padding: 8px 18px;
+  border-radius: 9999px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.has-cinema-tv-tab-btn:hover,
+.has-cinema-tv-tab-btn:focus,
+.has-cinema-tv-tab-btn:focus-visible {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.14);
+  border-color: #818cf8;
+  outline: 3px solid #818cf8 !important;
+  box-shadow: 0 0 18px rgba(129, 140, 248, 0.75) !important;
+  transform: scale(1.05);
+}
+
+.has-cinema-tv-tab-btn.active {
+  background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+  color: #ffffff;
+  border-color: #818cf8;
+  box-shadow: 0 4px 15px rgba(99, 102, 241, 0.45);
 }
 
 .has-tv-mode .has-cinema-hero {

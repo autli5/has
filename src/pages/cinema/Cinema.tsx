@@ -652,6 +652,50 @@ export default function Cinema({
     }, 3500);
   }, []);
 
+  const [isPlayingState, setIsPlayingState] = useState(true);
+
+  const triggerPlayerPlayPause = useCallback(() => {
+    if (videoRef.current) {
+      if (videoRef.current.paused) {
+        videoRef.current.play().catch(() => {});
+        setIsPlayingState(true);
+        showTvToast("Воспроизведение", "▶", 1200);
+      } else {
+        videoRef.current.pause();
+        setIsPlayingState(false);
+        showTvToast("Пауза", "⏸", 1200);
+      }
+    } else {
+      const iframe = document.querySelector<HTMLIFrameElement>(".has-cinema-iframe-elem");
+      if (iframe && iframe.contentWindow) {
+        setIsPlayingState((prev) => {
+          const next = !prev;
+          iframe.contentWindow?.postMessage({ key: "kodik_player_api", value: { method: next ? "play" : "pause" } }, "*");
+          iframe.contentWindow?.postMessage({ api: next ? "play" : "pause" }, "*");
+          iframe.contentWindow?.postMessage({ type: next ? "PLAY" : "PAUSE" }, "*");
+          showTvToast(next ? "Воспроизведение" : "Пауза", next ? "▶" : "⏸", 1200);
+          return next;
+        });
+      }
+    }
+  }, [showTvToast]);
+
+  const triggerPlayerSeek = useCallback((secondsDelta: number) => {
+    if (videoRef.current) {
+      videoRef.current.currentTime = Math.max(
+        0,
+        Math.min(videoRef.current.duration || 999999, videoRef.current.currentTime + secondsDelta)
+      );
+    } else {
+      const iframe = document.querySelector<HTMLIFrameElement>(".has-cinema-iframe-elem");
+      if (iframe && iframe.contentWindow) {
+        iframe.contentWindow.postMessage({ key: "kodik_player_api", value: { method: "seek_delta", time: secondsDelta } }, "*");
+        iframe.contentWindow.postMessage({ api: "seek", delta: secondsDelta }, "*");
+      }
+    }
+    showTvToast(secondsDelta > 0 ? `+${secondsDelta} сек` : `${secondsDelta} сек`, secondsDelta > 0 ? "⏩" : "⏪", 1000);
+  }, [showTvToast]);
+
   // Universal helper to convert a TMDB item into CinemaMediaItem
   const mapTmdbItem = (item: RawTmdbItem, forcedType?: "movie" | "tv"): CinemaMediaItem => {
     let isTv = false;
@@ -1524,11 +1568,16 @@ export default function Cinema({
             if (info.imdb_id) setCurrentImdbId(info.imdb_id);
             if (info.iframe_url) {
               setCurrentAllohaUrl(info.iframe_url);
-              // Do not automatically switch to Alloha to avoid Riobet ads and low-bitrate audio hiss
+              setSelectedMirror("alloha_ru");
+              setIsMirrorConnecting(false);
+              if (mirrorWatchdogTimerRef.current) {
+                clearTimeout(mirrorWatchdogTimerRef.current);
+                mirrorWatchdogTimerRef.current = null;
+              }
             }
             if (!isAnime) {
               setRussianDubNotice(
-                `🇷🇺 Доступно: «${info.russian_title || media.title}» в чистом качестве.`
+                `🇷🇺 Скоростной поток: «${info.russian_title || media.title}» в Full HD качестве.`
               );
             }
           }
@@ -1544,6 +1593,12 @@ export default function Cinema({
             if (d?.id_imdb) setCurrentImdbId(d.id_imdb);
             if (d?.iframe) {
               setCurrentAllohaUrl(d.iframe);
+              setSelectedMirror("alloha_ru");
+              setIsMirrorConnecting(false);
+              if (mirrorWatchdogTimerRef.current) {
+                clearTimeout(mirrorWatchdogTimerRef.current);
+                mirrorWatchdogTimerRef.current = null;
+              }
             }
           }
         })
@@ -1576,11 +1631,18 @@ export default function Cinema({
         document.querySelector<HTMLElement>(".has-cinema-grid-card");
       if (target) {
         target.focus();
-        target.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
+        target.scrollIntoView({ behavior: "auto", block: "nearest", inline: "nearest" });
         playTvBeep(640, 0.03);
       }
     }, 50);
   }, [playTvBeep]);
+
+  // Auto-focus first actionable item in TV mode on mount or tab change
+  useEffect(() => {
+    if (isTvMode && !playingEpisode && !detailsMedia) {
+      focusFirstContentCard();
+    }
+  }, [isTvMode, activeTab, playingEpisode, detailsMedia, focusFirstContentCard]);
 
   // Play button from Details Modal
   const handlePlayFromDetails = (seasonNum: number = 1, episode?: CinemaEpisode) => {
@@ -1682,41 +1744,6 @@ export default function Cinema({
     }
   };
 
-  // Quick 1-click multi-source switcher with automatic fallback
-  const handleCycleMirror = () => {
-    if (mirrorWatchdogTimerRef.current) {
-      clearTimeout(mirrorWatchdogTimerRef.current);
-      mirrorWatchdogTimerRef.current = null;
-    }
-
-    const mirrors = getAvailableMirrorsList();
-    const currentIndex = mirrors.indexOf(selectedMirror);
-    const nextIndex = (currentIndex + 1) % mirrors.length;
-    const nextMirror = mirrors[nextIndex];
-    setSelectedMirror(nextMirror);
-    setAllMirrorsFailed(false);
-    setIsMirrorConnecting(true);
-    triedMirrorsRef.current.add(nextMirror);
-
-    const labels: Record<BalancerMirror, string> = {
-      vidlink_pro: "Сервер 1: VidLink Pro (1080p)",
-      kodik_ru: "Сервер 2: Kodik (Студии дубляжа)",
-      autoembed: "Сервер 3: AutoEmbed",
-      vidsrc_pm: "Сервер 4: VidSrc Pro",
-      multiembed: "Сервер 5: MultiStream VIP",
-      vidsrc_to: "Сервер 6: VidSrc To",
-      alloha_ru: "Сервер 7: Alloha",
-      anilibria: "Сервер 8: AniLibria HLS",
-      embess_ru: "Embess",
-      smotrim_ru: "Smotrim",
-    };
-    showTvToast(`Переключено на: ${labels[nextMirror] || nextMirror}`, "🔄", 2200);
-    resetHudTimer();
-
-    mirrorWatchdogTimerRef.current = setTimeout(() => {
-      handleAutoSwitchNextMirror("Сервер не ответил за 8 секунд");
-    }, 8000);
-  };
 
   // Save playback progress on time update
   const handleVideoTimeUpdate = () => {
@@ -1985,6 +2012,7 @@ export default function Cinema({
       if (playingEpisode !== null) {
         resetHudTimer();
 
+        // 1.1 Back button in player
         if (isBack) {
           e.preventDefault();
           if (showPlayerSettings) {
@@ -1995,58 +2023,69 @@ export default function Cinema({
             setShowPlayerEpisodes(false);
             return;
           }
+          if (isHudVisible) {
+            setIsHudVisible(false);
+            return;
+          }
           handleClosePlayer();
           showTvToast("Плеер закрыт", "✕", 1500);
           playTvBackBeep();
           return;
         }
 
-        // Pressing ArrowUp / Menu / Info on TV remote reveals HUD and focuses "← Назад" button
-        if (
-          e.key === "ArrowUp" ||
-          e.keyCode === 19 ||
-          e.keyCode === 38 ||
-          e.key === "Info"
-        ) {
-          e.preventDefault();
-          setIsHudVisible(true);
-          resetHudTimer();
-          setTimeout(() => {
-            const backBtn = document.querySelector<HTMLElement>(".has-cinema-player-btn-back");
-            if (backBtn) {
-              backBtn.focus();
-              playTvNavBeep();
-            }
-          }, 40);
-          return;
-        }
+        // 1.2 When HUD is HIDDEN:
+        if (!isHudVisible) {
+          // OK / Space / PlayPause: Toggle Play/Pause and show HUD
+          if (isOk || isPlayPause || e.code === "Space") {
+            e.preventDefault();
+            triggerPlayerPlayPause();
+            setIsHudVisible(true);
+            setTimeout(() => {
+              const playBtn = document.querySelector<HTMLElement>(".has-cinema-player-ctrl-btn.primary");
+              if (playBtn) playBtn.focus();
+            }, 30);
+            return;
+          }
 
-        // Pressing ArrowDown on TV remote reveals HUD and focuses server mirror pills / episodes
-        if (
-          e.key === "ArrowDown" ||
-          e.keyCode === 20 ||
-          e.keyCode === 40
-        ) {
-          const isAtBottom = document.activeElement?.closest(".has-cinema-player-server-pill, .has-cinema-player-hud-btn");
-          if (!isAtBottom || !isHudVisible) {
+          // Left Arrow: Rewind 10s
+          if (e.key === "ArrowLeft" || e.keyCode === 21 || e.keyCode === 37) {
+            e.preventDefault();
+            triggerPlayerSeek(-10);
+            return;
+          }
+
+          // Right Arrow: Forward 10s
+          if (e.key === "ArrowRight" || e.keyCode === 22 || e.keyCode === 39) {
+            e.preventDefault();
+            triggerPlayerSeek(10);
+            return;
+          }
+
+          // Up Arrow: Reveal HUD and focus Back button
+          if (e.key === "ArrowUp" || e.keyCode === 19 || e.keyCode === 38) {
             e.preventDefault();
             setIsHudVisible(true);
-            resetHudTimer();
             setTimeout(() => {
-              const serverPill =
-                document.querySelector<HTMLElement>(".has-cinema-player-server-pill.active") ||
-                document.querySelector<HTMLElement>(".has-cinema-player-server-pill") ||
-                document.querySelector<HTMLElement>(".has-cinema-player-hud-btn");
-              if (serverPill) {
-                serverPill.focus();
-                playTvNavBeep();
-              }
-            }, 40);
+              const backBtn = document.querySelector<HTMLElement>(".has-cinema-player-btn-back");
+              if (backBtn) backBtn.focus();
+            }, 30);
+            return;
+          }
+
+          // Down Arrow: Reveal HUD and focus Play/Pause button
+          if (e.key === "ArrowDown" || e.keyCode === 20 || e.keyCode === 40) {
+            e.preventDefault();
+            setIsHudVisible(true);
+            setTimeout(() => {
+              const playBtn = document.querySelector<HTMLElement>(".has-cinema-player-ctrl-btn.primary");
+              if (playBtn) playBtn.focus();
+            }, 30);
             return;
           }
         }
 
-        // Pressing OK / Enter / Center button in player
+        // 1.3 When HUD is VISIBLE:
+        // OK / Space button
         if (isOk) {
           const active = document.activeElement as HTMLElement | null;
           const isButtonFocused =
@@ -2055,92 +2094,69 @@ export default function Cinema({
               active.getAttribute("role") === "button" ||
               active.hasAttribute("data-tv-focusable"));
 
-          if (!isHudVisible) {
-            e.preventDefault();
-            setIsHudVisible(true);
-            resetHudTimer();
-            if (videoRef.current) {
-              if (videoRef.current.paused) {
-                videoRef.current.play().catch(() => {});
-                showTvToast("Воспроизведение", "▶", 1200);
-              } else {
-                videoRef.current.pause();
-                showTvToast("Пауза", "⏸", 1200);
-              }
-              playTvSelectBeep();
-            }
-            return;
-          }
-
           if (isButtonFocused && active) {
-            // Let the button click handler do its work, give audio feedback
+            e.preventDefault();
             playTvSelectBeep();
             active.click();
-            e.preventDefault();
             return;
           }
 
-          if (videoRef.current) {
-            e.preventDefault();
-            if (videoRef.current.paused) {
-              videoRef.current.play().catch(() => {});
-              showTvToast("Воспроизведение", "▶", 1200);
-            } else {
-              videoRef.current.pause();
-              showTvToast("Пауза", "⏸", 1200);
-            }
-            playTvSelectBeep();
-            return;
-          }
+          e.preventDefault();
+          triggerPlayerPlayPause();
+          return;
         }
 
         if (isPlayPause || (e.code === "Space" && !isInput)) {
           e.preventDefault();
-          if (videoRef.current) {
-            if (videoRef.current.paused) {
-              videoRef.current.play().catch(() => {});
-              showTvToast("Воспроизведение", "▶", 1200);
-            } else {
-              videoRef.current.pause();
-              showTvToast("Пауза", "⏸", 1200);
-            }
-            playTvSelectBeep();
-          }
+          triggerPlayerPlayPause();
           return;
         }
 
-        if (
-          isFastForward ||
-          (e.key === "ArrowRight" &&
-            !isInput &&
-            !document.activeElement?.closest(".has-cinema-player-modal .has-cinema-player-hud-btn, .has-cinema-player-server-pill"))
-        ) {
-          if (videoRef.current) {
+        if (isFastForward) {
+          e.preventDefault();
+          triggerPlayerSeek(10);
+          return;
+        }
+
+        if (isRewind) {
+          e.preventDefault();
+          triggerPlayerSeek(-10);
+          return;
+        }
+
+        // Two-row navigation within Player HUD:
+        const active = document.activeElement as HTMLElement | null;
+        const isTopRow = active?.getAttribute("data-tv-row") === "top";
+        const isBottomRow = active?.getAttribute("data-tv-row") === "bottom";
+
+        if (e.key === "ArrowUp" || e.keyCode === 19 || e.keyCode === 38) {
+          if (isBottomRow) {
             e.preventDefault();
-            videoRef.current.currentTime = Math.min(
-              videoRef.current.duration || 999999,
-              videoRef.current.currentTime + 10
-            );
-            showTvToast("+10 сек", "⏩", 1000);
-            playTvNavBeep();
+            const topTarget =
+              document.querySelector<HTMLElement>(".has-cinema-player-btn-back") ||
+              document.querySelector<HTMLElement>('[data-tv-row="top"]');
+            if (topTarget) {
+              topTarget.focus();
+              playTvNavBeep();
+            }
             return;
           }
         }
 
-        if (
-          isRewind ||
-          (e.key === "ArrowLeft" &&
-            !isInput &&
-            !document.activeElement?.closest(".has-cinema-player-modal .has-cinema-player-hud-btn, .has-cinema-player-server-pill"))
-        ) {
-          if (videoRef.current) {
+        if (e.key === "ArrowDown" || e.keyCode === 20 || e.keyCode === 40) {
+          if (isTopRow) {
             e.preventDefault();
-            videoRef.current.currentTime = Math.max(
-              0,
-              videoRef.current.currentTime - 10
-            );
-            showTvToast("-10 сек", "⏪", 1000);
-            playTvNavBeep();
+            const bottomTarget =
+              document.querySelector<HTMLElement>(".has-cinema-player-ctrl-btn.primary") ||
+              document.querySelector<HTMLElement>('[data-tv-row="bottom"]');
+            if (bottomTarget) {
+              bottomTarget.focus();
+              playTvNavBeep();
+            }
+            return;
+          } else if (isBottomRow) {
+            e.preventDefault();
+            setIsHudVisible(false);
             return;
           }
         }
@@ -2304,7 +2320,7 @@ export default function Cinema({
 
         let focusables = Array.from(
           document.querySelectorAll<HTMLElement>(
-            '[data-tv-focusable="true"], .has-cinema-nav-item, .has-cinema-tv-nav-item, .has-cinema-btn-play, .has-cinema-btn-bookmark, .has-cinema-media-card, .has-cinema-grid-card, .has-cinema-episode-card, .has-cinema-player-hud-btn, .has-cinema-player-btn-back, .has-cinema-drawer-option-btn, .has-cinema-drawer-chip, .has-cinema-drawer-ep-btn, .has-cinema-drawer-close-btn, .has-cinema-drawer-btn-primary, .has-cinema-drawer-btn-secondary, .has-cinema-player-pill-nav, .has-cinema-season-tab, .has-cinema-details-btn-play, .has-cinema-details-close-btn, .has-cinema-details-btn-bookmark, .has-cinema-details-btn-trailer, .has-cinema-actor-card, .has-cinema-btn-info-wide'
+            '[data-tv-focusable="true"], .has-cinema-nav-item, .has-cinema-tv-nav-item, .has-cinema-tv-tab-btn, .has-cinema-tv-menu-btn, .has-cinema-player-ctrl-btn, .has-cinema-btn-play, .has-cinema-btn-bookmark, .has-cinema-media-card, .has-cinema-grid-card, .has-cinema-episode-card, .has-cinema-player-hud-btn, .has-cinema-player-btn-back, .has-cinema-drawer-option-btn, .has-cinema-drawer-chip, .has-cinema-drawer-ep-btn, .has-cinema-drawer-close-btn, .has-cinema-drawer-btn-primary, .has-cinema-drawer-btn-secondary, .has-cinema-player-pill-nav, .has-cinema-season-tab, .has-cinema-details-btn-play, .has-cinema-details-close-btn, .has-cinema-details-btn-bookmark, .has-cinema-details-btn-trailer, .has-cinema-actor-card, .has-cinema-btn-info-wide'
           )
         ).filter((el) => {
           const r = el.getBoundingClientRect();
@@ -2328,7 +2344,7 @@ export default function Cinema({
           focusables = focusables.filter((el) => !el.closest(".has-cinema-tv-nav-drawer"));
         }
 
-        // In TV mode, top header is hidden, so never include header elements
+        // In TV mode, desktop header is hidden, so never include desktop header elements
         if (isTvMode) {
           focusables = focusables.filter((el) => !el.closest(".has-cinema-header"));
         }
@@ -2352,15 +2368,16 @@ export default function Cinema({
         if (!current || !focusables.includes(current)) {
           const initial =
             focusables.find((el) => el.classList.contains("has-cinema-btn-play")) ||
+            focusables.find((el) => el.classList.contains("has-cinema-tv-tab-btn.active")) ||
             focusables.find((el) => el.classList.contains("has-cinema-nav-item")) ||
             focusables[0];
           if (initial) {
             e.preventDefault();
             initial.focus();
             initial.scrollIntoView({
-              behavior: "smooth",
-              block: "center",
-              inline: "center",
+              behavior: "auto",
+              block: "nearest",
+              inline: "nearest",
             });
             playTvBeep(580, 0.03);
           }
@@ -2388,6 +2405,11 @@ export default function Cinema({
           if (direction === "left" && dx >= -8) continue;
           if (direction === "right" && dx <= 8) continue;
 
+          // When moving vertically, only consider elements visible horizontally in viewport
+          if ((direction === "up" || direction === "down") && (cRect.right < 0 || cRect.left > window.innerWidth)) {
+            continue;
+          }
+
           let score = Infinity;
           if (direction === "up" || direction === "down") {
             score = Math.abs(dy) + Math.abs(dx) * 1.7;
@@ -2405,28 +2427,25 @@ export default function Cinema({
           e.preventDefault();
           bestEl.focus();
           bestEl.scrollIntoView({
-            behavior: "smooth",
-            block: "center",
-            inline: "center",
+            behavior: "auto",
+            block: "nearest",
+            inline: "nearest",
           });
           playTvBeep(640, 0.025);
         } else {
-          // If no element found in this direction outside modals:
-          // When moving LEFT from the leftmost card, summon the TV Navigation Drawer!
+          // Outside modals: when at the top and pressing UP, focus Leanback TV Top Bar
           if (!detailsEl && !playerEl && !trailerEl && !settingsSheet && !episodesSheet) {
-            if (direction === "left") {
-              e.preventDefault();
-              lastFocusedCardRef.current = current;
-              setIsTvNavOpen(true);
-              setTimeout(() => {
-                const targetNav =
-                  document.querySelector<HTMLElement>(".has-cinema-tv-nav-item.active") ||
-                  document.querySelector<HTMLElement>(".has-cinema-tv-nav-item");
-                if (targetNav) {
-                  targetNav.focus();
-                  playTvBeep(640, 0.03);
-                }
-              }, 40);
+            if (direction === "up" && isTvMode) {
+              const topTarget =
+                document.querySelector<HTMLElement>(".has-cinema-tv-tab-btn.active") ||
+                document.querySelector<HTMLElement>(".has-cinema-tv-menu-btn") ||
+                document.querySelector<HTMLElement>(".has-cinema-tv-tab-btn");
+              if (topTarget && topTarget !== current) {
+                e.preventDefault();
+                topTarget.focus();
+                topTarget.scrollIntoView({ behavior: "auto", block: "nearest", inline: "nearest" });
+                playTvBeep(640, 0.025);
+              }
             }
           }
         }
@@ -2484,6 +2503,19 @@ export default function Cinema({
       };
     }
   }, [playingEpisode, showPlayerSettings, showPlayerEpisodes, handleClosePlayer]);
+
+  // Auto-focus first interactive element when player settings drawer opens
+  useEffect(() => {
+    if (showPlayerSettings) {
+      const t = setTimeout(() => {
+        const firstFocus = document.querySelector<HTMLElement>(
+          ".has-cinema-player-settings-sheet [data-tv-focusable='true']"
+        );
+        if (firstFocus) firstFocus.focus();
+      }, 50);
+      return () => clearTimeout(t);
+    }
+  }, [showPlayerSettings]);
 
   // Handle Android TV hardware back & browser popstate for details modal
   useEffect(() => {
@@ -2945,6 +2977,103 @@ export default function Cinema({
             <span>▶ Вправо или Назад — закрыть меню</span>
           </div>
         </aside>
+      )}
+
+      {/* ========================================================
+          0. SLEEK LEANBACK TV NAVIGATION HEADER (Visible in TV Mode)
+          ======================================================== */}
+      {isTvMode && (
+        <header className="has-cinema-tv-top-bar" aria-label="ТВ Навигация">
+          <div className="has-cinema-tv-top-brand">
+            <button
+              type="button"
+              className="has-cinema-tv-menu-btn"
+              onClick={() => setIsTvNavOpen((prev) => !prev)}
+              data-tv-focusable="true"
+              title="Открыть меню"
+            >
+              ☰ Меню
+            </button>
+            <span className="has-cinema-tv-brand-title">HAS Кинотеатр</span>
+          </div>
+
+          <nav className="has-cinema-tv-top-tabs">
+            <button
+              type="button"
+              className={`has-cinema-tv-tab-btn ${activeTab === "home" && !searchQuery ? "active" : ""}`}
+              onClick={() => {
+                setActiveTab("home");
+                setSearchQuery("");
+                focusFirstContentCard();
+              }}
+              data-tv-focusable="true"
+            >
+              🏠 Каталог
+            </button>
+            <button
+              type="button"
+              className={`has-cinema-tv-tab-btn ${activeTab === "movies" && !searchQuery ? "active" : ""}`}
+              onClick={() => {
+                setActiveTab("movies");
+                setSearchQuery("");
+                focusFirstContentCard();
+              }}
+              data-tv-focusable="true"
+            >
+              🎬 Фильмы
+            </button>
+            <button
+              type="button"
+              className={`has-cinema-tv-tab-btn ${activeTab === "series" && !searchQuery ? "active" : ""}`}
+              onClick={() => {
+                setActiveTab("series");
+                setSearchQuery("");
+                focusFirstContentCard();
+              }}
+              data-tv-focusable="true"
+            >
+              📺 Сериалы
+            </button>
+            <button
+              type="button"
+              className={`has-cinema-tv-tab-btn ${activeTab === "history" ? "active" : ""}`}
+              onClick={() => {
+                setActiveTab("history");
+                setSearchQuery("");
+                focusFirstContentCard();
+              }}
+              data-tv-focusable="true"
+            >
+              🕒 История {cinemaState.history.length > 0 && `(${cinemaState.history.length})`}
+            </button>
+            <button
+              type="button"
+              className={`has-cinema-tv-tab-btn ${activeTab === "bookmarks" && !searchQuery ? "active" : ""}`}
+              onClick={() => {
+                setActiveTab("bookmarks");
+                setSearchQuery("");
+                focusFirstContentCard();
+              }}
+              data-tv-focusable="true"
+            >
+              ⭐ Мой список {cinemaState.bookmarks.length > 0 && `(${cinemaState.bookmarks.length})`}
+            </button>
+            <button
+              type="button"
+              className={`has-cinema-tv-tab-btn ${activeTab === "search" || searchQuery ? "active" : ""}`}
+              onClick={() => {
+                setActiveTab("search");
+                setTimeout(() => {
+                  const s = document.querySelector<HTMLInputElement>(".has-cinema-tv-search-input-field") || document.querySelector<HTMLInputElement>(".has-cinema-search-input");
+                  if (s) s.focus();
+                }, 50);
+              }}
+              data-tv-focusable="true"
+            >
+              🔍 Поиск
+            </button>
+          </nav>
+        </header>
       )}
 
       {/* ========================================================
@@ -4170,6 +4299,7 @@ export default function Cinema({
           }`}
           onMouseMove={resetHudTimer}
           onClick={resetHudTimer}
+          onDoubleClick={handleToggleFullscreen}
         >
           {/* Top Edge Sensor: triggers HUD immediately when cursor moves to top 90px of screen */}
           <div
@@ -4210,8 +4340,9 @@ export default function Cinema({
                   setIsHudVisible(true);
                   resetHudTimer();
                 }}
-                title="Назад к информации о фильме (Esc / Back / ▲)"
+                title="Назад к информации о фильме (Esc / Back)"
                 data-tv-focusable="true"
+                data-tv-row="top"
               >
                 ← Назад
               </button>
@@ -4228,176 +4359,22 @@ export default function Cinema({
                   <span className="has-cinema-player-hud-subtitle">Полный фильм</span>
                 )}
               </div>
-
-              {(playingMedia || selectedMedia).media_type !== "movie" && (
-                <div className="has-cinema-player-quick-ep-nav">
-                  <button
-                    type="button"
-                    className="has-cinema-player-pill-nav"
-                    disabled={playingEpisode.number <= 1}
-                    onClick={handlePrevEpisode}
-                    title="Предыдущая серия"
-                    data-tv-focusable="true"
-                  >
-                    ◀ Пред.
-                  </button>
-                  <button
-                    type="button"
-                    className="has-cinema-player-pill-nav"
-                    onClick={handleNextEpisode}
-                    title="Следующая серия"
-                    data-tv-focusable="true"
-                  >
-                    След. ▶
-                  </button>
-                </div>
-              )}
             </div>
 
             <div className="has-cinema-player-hud-right">
-              {/* Episodes button for Series only */}
-              {(playingMedia || selectedMedia).media_type !== "movie" && (
-                <button
-                  type="button"
-                  className={`has-cinema-player-hud-btn ${showPlayerEpisodes ? "active" : ""}`}
-                  onClick={() => {
-                    setShowPlayerEpisodes((prev) => !prev);
-                    setShowPlayerSettings(false);
-                    resetHudTimer();
-                  }}
-                  title="Список серий"
-                  data-tv-focusable="true"
-                >
-                  📺 Серии
-                </button>
-              )}
-
-              {/* Server selector buttons right in the HUD */}
-              <div className="has-cinema-player-hud-servers">
-                <button
-                  type="button"
-                  className={`has-cinema-player-server-pill ${selectedMirror === "vidlink_pro" ? "active" : ""}`}
-                  onClick={() => handleSelectMirror("vidlink_pro")}
-                  title="Сервер 1: Скоростной Full HD 1080p"
-                  data-tv-focusable="true"
-                >
-                  ⚡ Сервер 1 (1080p)
-                </button>
-                <button
-                  type="button"
-                  className={`has-cinema-player-server-pill ${selectedMirror === "kodik_ru" ? "active" : ""}`}
-                  onClick={() => handleSelectMirror("kodik_ru")}
-                  title="Сервер 2: Студии дубляжа (Kodik)"
-                  data-tv-focusable="true"
-                >
-                  🎙️ Сервер 2 (Дубляж)
-                </button>
-                <button
-                  type="button"
-                  className={`has-cinema-player-server-pill ${selectedMirror === "autoembed" ? "active" : ""}`}
-                  onClick={() => handleSelectMirror("autoembed")}
-                  title="Сервер 3: AutoEmbed"
-                  data-tv-focusable="true"
-                >
-                  🌐 Сервер 3
-                </button>
-                <button
-                  type="button"
-                  className={`has-cinema-player-server-pill ${selectedMirror === "vidsrc_pm" ? "active" : ""}`}
-                  onClick={() => handleSelectMirror("vidsrc_pm")}
-                  title="Сервер 4: VidSrc"
-                  data-tv-focusable="true"
-                >
-                  🎬 Сервер 4
-                </button>
-                <button
-                  type="button"
-                  className={`has-cinema-player-server-pill ${selectedMirror === "multiembed" ? "active" : ""}`}
-                  onClick={() => handleSelectMirror("multiembed")}
-                  title="Сервер 5: MultiStream"
-                  data-tv-focusable="true"
-                >
-                  🚀 Сервер 5
-                </button>
-              </div>
-
-              {/* Quick mirror switcher */}
-              <button
-                type="button"
-                className="has-cinema-player-hud-btn"
-                onClick={handleCycleMirror}
-                title="Переключить на следующий сервер (если текущий заблокирован или не загружается)"
-                data-tv-focusable="true"
-              >
-                🔄 Сменить источник
-              </button>
-
-              {/* AdBlock Guard toggle */}
-              <button
-                type="button"
-                className={`has-cinema-player-hud-btn adblock-pill ${isAdBlockEnabled ? "active" : ""}`}
-                onClick={() => {
-                  setIsAdBlockEnabled((prev) => !prev);
-                  showTvToast(
-                    !isAdBlockEnabled
-                      ? "🛡️ Блокировка рекламы и казино ВКЛ"
-                      : "⚠️ Блокировка рекламы ВЫКЛ",
-                    "🛡️",
-                    1800
-                  );
-                  resetHudTimer();
-                }}
-                title={isAdBlockEnabled ? "Блокировщик рекламы активен (всплывающие окна и казино заблокированы)" : "Включить блокировку рекламы"}
-                data-tv-focusable="true"
-              >
-                🛡️ {isAdBlockEnabled ? "Без рекламы" : "Реклама: Вкл"}
-              </button>
-
-              {/* Quick Skip Ad / Intro Pill */}
-              <button
-                type="button"
-                className="has-cinema-player-hud-btn ad-skip-pill"
-                onClick={() => {
-                  if (videoRef.current) {
-                    videoRef.current.currentTime = Math.min(
-                      videoRef.current.duration || 999999,
-                      videoRef.current.currentTime + 20
-                    );
-                  }
-                  showTvToast("Пропуск рекламы (+20 сек)", "⏩", 1500);
-                  playTvSelectBeep();
-                  resetHudTimer();
-                }}
-                title="Пропустить рекламу казино или вступительную заставку (+20 сек)"
-                data-tv-focusable="true"
-              >
-                ⏩ Пропуск (+20с)
-              </button>
-
-              {/* Single Settings button (Contains voiceover studios & mirrors) */}
+              {/* Single Gear Button: Contains ALL player functions */}
               <button
                 type="button"
                 className={`has-cinema-player-hud-btn ${showPlayerSettings ? "active" : ""}`}
                 onClick={() => {
                   setShowPlayerSettings((prev) => !prev);
-                  setShowPlayerEpisodes(false);
                   resetHudTimer();
                 }}
-                title="Озвучка, качество и серверы"
+                title="Все настройки: озвучка, серии, серверы, пропуск заставки"
                 data-tv-focusable="true"
+                data-tv-row="top"
               >
-                ⚙️ Озвучка / Сервер
-              </button>
-
-              {/* Fullscreen toggle */}
-              <button
-                type="button"
-                className="has-cinema-player-hud-btn icon-only"
-                onClick={handleToggleFullscreen}
-                title={isFullscreen ? "Выйти из полноэкранного режима" : "Развернуть во весь экран"}
-                data-tv-focusable="true"
-              >
-                {isFullscreen ? "🗗" : "⛶"}
+                ⚙️ Настройки
               </button>
 
               {/* Close */}
@@ -4414,24 +4391,98 @@ export default function Cinema({
                 }}
                 title="Закрыть плеер"
                 data-tv-focusable="true"
+                data-tv-row="top"
               >
                 ✕
               </button>
             </div>
           </div>
 
-          {/* Quick Fallback Switcher (Always accessible if video fails to load) */}
-          <div className={`has-cinema-player-bottom-failover ${!isHudVisible ? "hud-hidden" : ""}`}>
-            <span className="failover-hint">Не работает плеер?</span>
-            <button
-              type="button"
-              className="failover-btn"
-              onClick={handleCycleMirror}
-              data-tv-focusable="true"
-              title="Переключить на следующий доступный сервер"
-            >
-              🔄 Сменить сервер
-            </button>
+          {/* Leanback Bottom Playback Controls Bar */}
+          <div
+            className={`has-cinema-player-bottom-hud ${!isHudVisible ? "hud-hidden" : ""}`}
+            onMouseEnter={() => {
+              setIsHudVisible(true);
+              resetHudTimer();
+            }}
+            onMouseMove={resetHudTimer}
+          >
+            <div className="has-cinema-player-controls-row">
+              {(playingMedia || selectedMedia).media_type !== "movie" && (
+                <button
+                  type="button"
+                  className="has-cinema-player-ctrl-btn"
+                  disabled={playingEpisode.number <= 1}
+                  onClick={() => {
+                    handlePrevEpisode();
+                    resetHudTimer();
+                  }}
+                  title="Предыдущая серия"
+                  data-tv-focusable="true"
+                  data-tv-row="bottom"
+                >
+                  ⏮ Пред.
+                </button>
+              )}
+
+              <button
+                type="button"
+                className="has-cinema-player-ctrl-btn"
+                onClick={() => {
+                  triggerPlayerSeek(-10);
+                  resetHudTimer();
+                }}
+                title="Перемотка назад (-10 сек)"
+                data-tv-focusable="true"
+                data-tv-row="bottom"
+              >
+                ⏪ -10с
+              </button>
+
+              <button
+                type="button"
+                className="has-cinema-player-ctrl-btn primary"
+                onClick={() => {
+                  triggerPlayerPlayPause();
+                  resetHudTimer();
+                }}
+                title="Воспроизведение / Пауза (Space / OK)"
+                data-tv-focusable="true"
+                data-tv-row="bottom"
+              >
+                {isPlayingState ? "⏸ Пауза" : "▶ Воспроизведение"}
+              </button>
+
+              <button
+                type="button"
+                className="has-cinema-player-ctrl-btn"
+                onClick={() => {
+                  triggerPlayerSeek(10);
+                  resetHudTimer();
+                }}
+                title="Перемотка вперед (+10 сек)"
+                data-tv-focusable="true"
+                data-tv-row="bottom"
+              >
+                ⏩ +10с
+              </button>
+
+              {(playingMedia || selectedMedia).media_type !== "movie" && (
+                <button
+                  type="button"
+                  className="has-cinema-player-ctrl-btn"
+                  onClick={() => {
+                    handleNextEpisode();
+                    resetHudTimer();
+                  }}
+                  title="Следующая серия"
+                  data-tv-focusable="true"
+                  data-tv-row="bottom"
+                >
+                  След. ⏭
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Clean 100% Video Canvas */}
@@ -4527,15 +4578,10 @@ export default function Cinema({
               )
             ) : playerMode === "balancer" ? (
               <iframe
-                key={`${selectedMirror}-${balancerEmbedUrl}-${isAdBlockEnabled}`}
+                key={`${selectedMirror}-${balancerEmbedUrl}`}
                 src={balancerEmbedUrl}
                 title={(playingMedia || selectedMedia).title}
                 className="has-cinema-iframe-elem"
-                sandbox={
-                  isAdBlockEnabled
-                    ? "allow-scripts allow-same-origin allow-forms allow-presentation"
-                    : undefined
-                }
                 allow="autoplay *; fullscreen *; encrypted-media *; picture-in-picture *; clipboard-write *"
                 referrerPolicy="no-referrer-when-downgrade"
                 allowFullScreen
@@ -4588,6 +4634,80 @@ export default function Cinema({
                 </div>
 
                 <div className="has-cinema-drawer-body">
+                  {/* Quick Controls Section */}
+                  <div className="has-cinema-drawer-section">
+                    <h4 className="has-cinema-drawer-section-title">
+                      ⏩ Быстрое управление и экран
+                    </h4>
+                    <div className="has-cinema-drawer-chips-wrap">
+                      <button
+                        type="button"
+                        className="has-cinema-drawer-chip"
+                        onClick={() => {
+                          triggerPlayerSeek(20);
+                          setShowPlayerSettings(false);
+                        }}
+                        data-tv-focusable="true"
+                        title="Перемотать заставку на 20 секунд вперед"
+                      >
+                        ⏩ Пропуск рекламы / заставки (+20с)
+                      </button>
+                      <button
+                        type="button"
+                        className="has-cinema-drawer-chip"
+                        onClick={() => {
+                          triggerPlayerSeek(85);
+                          setShowPlayerSettings(false);
+                        }}
+                        data-tv-focusable="true"
+                        title="Перемотать опенинг / интро на 85 секунд вперед"
+                      >
+                        ⏩ Пропуск опенинга (+85с)
+                      </button>
+                      <button
+                        type="button"
+                        className="has-cinema-drawer-chip"
+                        onClick={() => {
+                          handleToggleFullscreen();
+                          setShowPlayerSettings(false);
+                        }}
+                        data-tv-focusable="true"
+                        title="Переключить полноэкранный режим"
+                      >
+                        {isFullscreen ? "🗗 Оконный режим" : "⛶ Во весь экран"}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Series & Episode selection section */}
+                  {(playingMedia || selectedMedia).media_type !== "movie" && (
+                    <div className="has-cinema-drawer-section">
+                      <h4 className="has-cinema-drawer-section-title">
+                        📺 Выбор серии (Сезон {playingSeasonNumber})
+                      </h4>
+                      <div className="has-cinema-drawer-chips-wrap">
+                        {((playingMedia || selectedMedia).seasons.find(
+                          (s) => s.season_number === playingSeasonNumber
+                        )?.episodes || []).map((ep) => (
+                          <button
+                            key={ep.id}
+                            type="button"
+                            className={`has-cinema-drawer-chip ${
+                              playingEpisode?.number === ep.number ? "active" : ""
+                            }`}
+                            onClick={() => {
+                              startPlayback(playingMedia || selectedMedia, playingSeasonNumber, ep);
+                              setShowPlayerSettings(false);
+                            }}
+                            data-tv-focusable="true"
+                          >
+                            Серия {ep.number}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Voiceover / Audio Track Section */}
                   <div className="has-cinema-drawer-section">
                     <h4 className="has-cinema-drawer-section-title">

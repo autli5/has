@@ -417,6 +417,13 @@ svg {
   color: #cbd5e1;
 }
 
+/* Button 3: Выход из приложения (Exit) */
+.has-tv-updater-btn.btn-exit {
+  background: rgba(239, 68, 68, 0.15);
+  border: 2px solid rgba(239, 68, 68, 0.35);
+  color: #fca5a5;
+}
+
 /* D-Pad Remote Control Focused Glow */
 .has-tv-updater-btn.focused {
   transform: scale(1.08);
@@ -428,6 +435,12 @@ svg {
 .has-tv-updater-btn.btn-skip.focused {
   background: rgba(51, 65, 85, 1);
   box-shadow: 0 0 0 4px #ffffff, 0 0 30px rgba(255, 255, 255, 0.4) !important;
+}
+
+.has-tv-updater-btn.btn-exit.focused {
+  background: rgba(220, 38, 38, 0.9);
+  box-shadow: 0 0 0 4px #ffffff, 0 0 35px rgba(239, 68, 68, 0.8) !important;
+  color: #ffffff;
 }
 
 /* TV Progress View */

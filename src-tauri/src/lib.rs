@@ -6,7 +6,7 @@ mod cinema;
 
 use admin::DeviceSecurityInfo;
 use auth::{AuthResponse, DbStatus, ResetRequestResponse};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use storage::{ServerUserDto, StorageItemDto, StorageStats};
 
 #[derive(Debug, Serialize)]
@@ -201,6 +201,150 @@ async fn admin_delete_user(
     admin::admin_delete_user(&admin_email, target_id, admin_pin).await
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppReleaseInfo {
+    pub version: String,
+    pub current_version: String,
+    pub body: String,
+    pub has_update: bool,
+    pub download_url: String,
+    pub platform: String,
+    pub windows_url: Option<String>,
+    pub tv_apk_url: Option<String>,
+    pub mobile_apk_url: Option<String>,
+    pub linux_url: Option<String>,
+    pub macos_url: Option<String>,
+}
+
+fn detect_current_platform() -> &'static str {
+    #[cfg(target_os = "android")]
+    {
+        "android"
+    }
+    #[cfg(target_os = "windows")]
+    {
+        "windows"
+    }
+    #[cfg(target_os = "macos")]
+    {
+        "macos"
+    }
+    #[cfg(target_os = "linux")]
+    {
+        "linux"
+    }
+    #[cfg(not(any(target_os = "android", target_os = "windows", target_os = "macos", target_os = "linux")))]
+    {
+        "unknown"
+    }
+}
+
+fn is_newer_semver(remote: &str, current: &str) -> bool {
+    let parse = |v: &str| -> Vec<u32> {
+        v.trim_start_matches('v')
+            .split('.')
+            .map(|s| s.parse::<u32>().unwrap_or(0))
+            .collect()
+    };
+    let r = parse(remote);
+    let c = parse(current);
+    for i in 0..r.len().max(c.len()) {
+        let rv = *r.get(i).unwrap_or(&0);
+        let cv = *c.get(i).unwrap_or(&0);
+        if rv > cv {
+            return true;
+        }
+        if rv < cv {
+            return false;
+        }
+    }
+    false
+}
+
+#[tauri::command]
+async fn check_app_update(current_version: Option<String>) -> Result<AppReleaseInfo, String> {
+    let cur_ver = current_version.unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string());
+    let client = reqwest::Client::builder()
+        .user_agent("HAS-App-Updater")
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let res = client
+        .get("https://api.github.com/repos/autli5/has/releases/latest")
+        .header("Accept", "application/vnd.github.v3+json")
+        .send()
+        .await
+        .map_err(|e| format!("Failed to reach GitHub: {}", e))?;
+
+    if !res.status().is_success() {
+        return Err(format!("GitHub API returned HTTP {}", res.status()));
+    }
+
+    let json: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
+    let raw_tag = json["tag_name"].as_str().unwrap_or("0.0.0");
+    let remote_version = raw_tag.trim_start_matches('v').to_string();
+    let body = json["body"].as_str().unwrap_or("Новое обновление доступно.").to_string();
+    let html_url = json["html_url"]
+        .as_str()
+        .unwrap_or("https://github.com/autli5/has/releases/latest")
+        .to_string();
+
+    let has_update = is_newer_semver(&remote_version, &cur_ver);
+
+    let mut tv_apk_url = None;
+    let mut mobile_apk_url = None;
+    let mut windows_url = None;
+    let mut linux_url = None;
+    let mut macos_url = None;
+
+    if let Some(assets) = json["assets"].as_array() {
+        for asset in assets {
+            if let (Some(name), Some(url)) = (asset["name"].as_str(), asset["browser_download_url"].as_str()) {
+                let lower = name.to_lowercase();
+                if (lower.contains("_tv_") || lower.contains("-tv-") || lower.contains(".tv.")) && lower.ends_with(".apk") {
+                    tv_apk_url = Some(url.to_string());
+                } else if lower.ends_with(".apk") && mobile_apk_url.is_none() {
+                    mobile_apk_url = Some(url.to_string());
+                } else if lower.ends_with(".exe") || lower.ends_with(".msi") {
+                    if windows_url.is_none() || lower.ends_with(".exe") {
+                        windows_url = Some(url.to_string());
+                    }
+                } else if lower.ends_with(".deb") || lower.ends_with(".appimage") || lower.ends_with(".rpm") {
+                    if linux_url.is_none() || lower.ends_with(".deb") {
+                        linux_url = Some(url.to_string());
+                    }
+                } else if lower.ends_with(".dmg") {
+                    macos_url = Some(url.to_string());
+                }
+            }
+        }
+    }
+
+    if tv_apk_url.is_none() && mobile_apk_url.is_some() {
+        tv_apk_url = mobile_apk_url.clone();
+    }
+    if mobile_apk_url.is_none() && tv_apk_url.is_some() {
+        mobile_apk_url = tv_apk_url.clone();
+    }
+
+    let platform = detect_current_platform().to_string();
+
+    Ok(AppReleaseInfo {
+        version: remote_version,
+        current_version: cur_ver,
+        body,
+        has_update,
+        download_url: html_url,
+        platform,
+        windows_url,
+        tv_apk_url,
+        mobile_apk_url,
+        linux_url,
+        macos_url,
+    })
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let _ = rustls::crypto::ring::default_provider().install_default();
@@ -254,7 +398,8 @@ pub fn run() {
             cinema::toggle_cinema_bookmark,
             cinema::tmdb_query,
             cinema::get_russian_media_info,
-            cinema::filter_playable_media
+            cinema::filter_playable_media,
+            check_app_update
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
