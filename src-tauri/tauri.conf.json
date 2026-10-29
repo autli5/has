@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "has",
-  "version": "0.0.17",
+  "version": "0.0.18",
   "identifier": "com.has.tauri-app",
   "build": {
     "beforeDevCommand": "npm run dev",

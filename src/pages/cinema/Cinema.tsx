@@ -760,12 +760,21 @@ export default function Cinema({
     broadcastToWindowTree({ action: "unmute" });
     broadcastToWindowTree({ method: "volume", value: 1 });
     broadcastToWindowTree({ method: "setVolume", value: 100 });
+    broadcastToWindowTree({ method: "setVolume", volume: 100 });
     broadcastToWindowTree({ method: "unmute" });
+    broadcastToWindowTree({ method: "unMute" });
 
-    // 5. VidLink Pro / Video.js API
-    broadcastToWindowTree({ type: "VOLUME", volume: 1 });
-    broadcastToWindowTree({ type: "SET_VOLUME", data: { volume: 1 } });
+    // 5. JW Player / VidLink Pro / Video.js API
+    broadcastToWindowTree({ method: "setMute", value: false });
+    broadcastToWindowTree({ method: "setMute", mute: false });
+    broadcastToWindowTree({ method: "setVolume", value: 100 });
+    broadcastToWindowTree({ method: "setVolume", volume: 100 });
+    broadcastToWindowTree({ action: "setMute", value: false });
+    broadcastToWindowTree({ action: "setVolume", value: 100 });
+    broadcastToWindowTree({ command: "setMute", value: false });
+    broadcastToWindowTree({ type: "SET_VOLUME", volume: 100 });
     broadcastToWindowTree({ type: "SET_VOLUME", data: { volume: 100 } });
+    broadcastToWindowTree({ type: "UNMUTE" });
     broadcastToWindowTree({ type: "unmute" });
     broadcastToWindowTree({ action: "volume", value: 1 });
     broadcastToWindowTree({ action: "unmute" });
@@ -778,6 +787,7 @@ export default function Cinema({
     broadcastToWindowTree({ method: "setVolume", volume: 100 });
     broadcastToWindowTree({ method: "setVolume", value: 100 });
     broadcastToWindowTree({ method: "unmute" });
+    broadcastToWindowTree({ method: "unMute" });
     broadcastToWindowTree({ command: "setVolume", volume: 100 });
     broadcastToWindowTree({ command: "unmute" });
 
@@ -795,22 +805,17 @@ export default function Cinema({
       videoRef.current.play().catch(() => {});
     } else {
       sendIframePlaybackCommand("play");
-      // Awaken iframe user activation without permanently trapping focus
       const iframe = document.querySelector<HTMLIFrameElement>(".has-cinema-iframe-elem");
       if (iframe) {
         try {
           iframe.focus();
         } catch {}
-        setTimeout(() => {
-          const playBtn = document.querySelector<HTMLElement>(".has-cinema-player-ctrl-btn.primary");
-          if (playBtn) playBtn.focus();
-        }, 120);
       }
     }
     // Установка громкости 100% каждый раз при воспроизведении
     setPlayerVolumeMax(false);
-    setTimeout(() => setPlayerVolumeMax(false), 500);
-    setTimeout(() => setPlayerVolumeMax(false), 1500);
+    setTimeout(() => setPlayerVolumeMax(false), 400);
+    setTimeout(() => setPlayerVolumeMax(false), 1200);
     setIsPlayingState(true);
     showTvToast("Воспроизведение", "▶", 1200);
   }, [sendIframePlaybackCommand, setPlayerVolumeMax, showTvToast]);
@@ -1126,16 +1131,21 @@ export default function Cinema({
         }
       }
 
-      // Also query Russian media info for Kinopoisk ID / rating
+      // Also query Russian media info for Kinopoisk ID / rating & pre-resolve stream
       if (isTauri && item.tmdb_id) {
         invoke<RussianMediaInfo>("get_russian_media_info", {
           tmdbId: item.tmdb_id,
           isTv: item.media_type === "tv",
           title: item.title || item.original_title,
         }).then((info) => {
-          if (info?.kp_id) {
-            setDetailsMedia((prev) => (prev && prev.id === item.id ? { ...prev, kinopoisk_rating: info.kp_id ? "КП" : undefined } : prev));
-            setSelectedMedia((prev) => (prev && prev.id === item.id ? { ...prev, kinopoisk_rating: info.kp_id ? "КП" : undefined } : prev));
+          if (info) {
+            if (info.kp_id) setCurrentKpId(Number(info.kp_id));
+            if (info.imdb_id) setCurrentImdbId(info.imdb_id);
+            if (info.iframe_url) setCurrentAllohaUrl(info.iframe_url);
+            if (info.kp_id) {
+              setDetailsMedia((prev) => (prev && prev.id === item.id ? { ...prev, kinopoisk_rating: info.kp_id ? "КП" : undefined } : prev));
+              setSelectedMedia((prev) => (prev && prev.id === item.id ? { ...prev, kinopoisk_rating: info.kp_id ? "КП" : undefined } : prev));
+            }
           }
         }).catch(() => {});
       }
@@ -1762,11 +1772,7 @@ export default function Cinema({
     const knownKp = media.tmdb_id ? KNOWN_KP_MAP[media.tmdb_id] : null;
     if (knownKp) {
       setCurrentKpId(knownKp);
-    } else {
-      setCurrentKpId(null);
     }
-    setCurrentImdbId(null);
-    setCurrentAllohaUrl(null);
 
     // Reset mirror tracking and watchdog for fresh playback session
     triedMirrorsRef.current.clear();
@@ -1780,20 +1786,27 @@ export default function Cinema({
       handleAutoSwitchNextMirror("Сервер не ответил за 8 секунд (автопереключение)");
     }, 8000);
 
-    // Default to verified reliable high-speed 1080p stream:
+    // Prioritize reliable Russian servers with full remote control and working audio:
     if (isAnime) {
       if (anilibriaStreamUrl) {
         setSelectedMirror("anilibria");
       } else if (kodikResults.length > 0) {
         setSelectedMirror("kodik_ru");
       } else {
-        setSelectedMirror("vidlink_pro");
+        setSelectedMirror("kodik_ru");
       }
       showTvToast("🌸 Сервер: Kodik (Аниме / Озвучка)", "🎙️", 1800);
     } else {
-      // Default to VidLink Pro (ultra reliable, resolves all TMDB movies/series in 1080p)
-      setSelectedMirror("vidlink_pro");
-      showTvToast("⚡ Запущен Сервер 1 (Full HD 1080p)", "🎬", 1800);
+      if (currentAllohaUrl || knownKp || currentKpId) {
+        setSelectedMirror("alloha_ru");
+        showTvToast("🔊 Сервер: Alloha (Русский дубляж)", "🎬", 1800);
+      } else if (kodikResults.length > 0) {
+        setSelectedMirror("kodik_ru");
+        showTvToast("🎙️ Сервер: Kodik (Студии дубляжа)", "🎬", 1800);
+      } else {
+        setSelectedMirror("alloha_ru");
+        showTvToast("⚡ Запуск плеера Full HD", "🎬", 1800);
+      }
     }
 
     // Resolve Kinopoisk ID & Russian media data asynchronously via Rust backend or web fetch
@@ -1809,6 +1822,13 @@ export default function Cinema({
             if (info.imdb_id) setCurrentImdbId(info.imdb_id);
             if (info.iframe_url) {
               setCurrentAllohaUrl(info.iframe_url);
+              setSelectedMirror("alloha_ru");
+              setIsMirrorConnecting(false);
+              if (mirrorWatchdogTimerRef.current) {
+                clearTimeout(mirrorWatchdogTimerRef.current);
+                mirrorWatchdogTimerRef.current = null;
+              }
+            } else if (info.kp_id) {
               setSelectedMirror("alloha_ru");
               setIsMirrorConnecting(false);
               if (mirrorWatchdogTimerRef.current) {
@@ -2840,28 +2860,38 @@ export default function Cinema({
     };
   }, [handleRemoteKeyDown]);
 
-  // Guard TV remote focus: Never let iframe capture or trap remote control keys
+  // Auto-focus first interactive element when player settings drawer opens
   useEffect(() => {
-    if (playingEpisode !== null) {
-      const handleWindowBlur = () => {
-        setTimeout(() => {
-          if (document.activeElement?.tagName === "IFRAME") {
-            (document.activeElement as HTMLElement).blur();
-          }
-          window.focus();
-          const target =
-            document.querySelector<HTMLElement>(".has-cinema-player-ctrl-btn.primary") ||
-            document.querySelector<HTMLElement>(".has-cinema-player-btn-back");
-          if (target) {
-            target.focus();
-          }
-        }, 30);
-      };
-
-      window.addEventListener("blur", handleWindowBlur);
-      return () => window.removeEventListener("blur", handleWindowBlur);
+    if (showPlayerSettings) {
+      const timer = setTimeout(() => {
+        const firstBtn =
+          document.querySelector<HTMLElement>(".has-cinema-player-settings-sheet .has-cinema-drawer-chip.primary") ||
+          document.querySelector<HTMLElement>(".has-cinema-player-settings-sheet .has-cinema-drawer-chip") ||
+          document.querySelector<HTMLElement>(".has-cinema-player-settings-sheet [data-tv-focusable='true']");
+        if (firstBtn) {
+          firstBtn.focus();
+        }
+      }, 50);
+      return () => clearTimeout(timer);
     }
-  }, [playingEpisode]);
+  }, [showPlayerSettings]);
+
+  // Auto-focus current episode when episodes drawer opens
+  useEffect(() => {
+    if (showPlayerEpisodes) {
+      const timer = setTimeout(() => {
+        const activeEp =
+          document.querySelector<HTMLElement>(".has-cinema-player-episodes-sheet .has-cinema-drawer-ep-btn.active") ||
+          document.querySelector<HTMLElement>(".has-cinema-player-episodes-sheet .has-cinema-drawer-ep-btn") ||
+          document.querySelector<HTMLElement>(".has-cinema-player-episodes-sheet [data-tv-focusable='true']");
+        if (activeEp) {
+          activeEp.focus();
+          activeEp.scrollIntoView({ behavior: "auto", block: "center", inline: "nearest" });
+        }
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [showPlayerEpisodes]);
 
   // Handle Android TV hardware back & browser popstate to guarantee return to movie details card
   useEffect(() => {
@@ -3088,24 +3118,16 @@ export default function Cinema({
         setKodikResults(finalDubbings);
         setSelectedKodikLink(finalDubbings[0].link);
         if (autoSwitch) {
-          setSelectedMirror("kodik_ru");
+          setSelectedMirror((prev) => (prev !== "alloha_ru" && prev !== "anilibria" ? "kodik_ru" : prev));
           setRussianDubNotice(`🇷🇺 Найдено ${finalDubbings.length} студий русской озвучки для «${targetTitle}».`);
         }
       } else {
         setKodikResults([]);
         setSelectedKodikLink(null);
-        if (autoSwitch) {
-          setSelectedMirror("vidlink_pro");
-          setRussianDubNotice("🇷🇺 Для данного фильма русская аудиодорожка встроена в плеер VidLink Pro (нажмите на шестеренку ⚙️ или значок аудио в правом нижнем углу плеера).");
-        }
       }
     } catch {
       setKodikResults([]);
       setSelectedKodikLink(null);
-      if (autoSwitch) {
-        setSelectedMirror("vidlink_pro");
-        setRussianDubNotice("🌍 Переключено на основной плеер VidLink Pro.");
-      }
     } finally {
       setIsSearchingKodik(false);
     }
@@ -3137,8 +3159,8 @@ export default function Cinema({
     switch (selectedMirror) {
       case "vidlink_pro":
         return isTv
-          ? `https://vidlink.pro/tv/${tmdb || 693134}/${sNum}/${epNum}?autoplay=true&primaryColor=6366f1`
-          : `https://vidlink.pro/movie/${tmdb || 693134}?autoplay=true&primaryColor=6366f1`;
+          ? `https://vidlink.pro/tv/${tmdb || 693134}/${sNum}/${epNum}?autoplay=1&muted=0&volume=100&primaryColor=6366f1`
+          : `https://vidlink.pro/movie/${tmdb || 693134}?autoplay=1&muted=0&volume=100&primaryColor=6366f1`;
 
       case "kodik_ru":
         if (selectedKodikLink) {
@@ -3149,9 +3171,16 @@ export default function Cinema({
           const l = kodikResults[0].link.startsWith("//") ? `https:${kodikResults[0].link}` : kodikResults[0].link;
           return appendAutoplay(l);
         }
+        if (currentAllohaUrl) {
+          const l = currentAllohaUrl.startsWith("//") ? `https:${currentAllohaUrl}` : currentAllohaUrl;
+          return appendAutoplay(l);
+        }
+        if (kpId) {
+          return `https://theatre.stravers.live/?kp=${kpId}&autoplay=1`;
+        }
         return isTv
-          ? `https://vidlink.pro/tv/${tmdb || 693134}/${sNum}/${epNum}?autoplay=true&primaryColor=6366f1`
-          : `https://vidlink.pro/movie/${tmdb || 693134}?autoplay=true&primaryColor=6366f1`;
+          ? `https://player.autoembed.co/embed/tv/${tmdb || 693134}/${sNum}/${epNum}?autoplay=1`
+          : `https://player.autoembed.co/embed/movie/${tmdb || 693134}?autoplay=1`;
 
       case "autoembed":
         return isTv
@@ -3184,14 +3213,24 @@ export default function Cinema({
         if (imdbId) {
           return `https://theatre.stravers.live/?imdb=${imdbId}&autoplay=1`;
         }
+        if (tmdb) {
+          return `https://theatre.stravers.live/?tmdb=${tmdb}&autoplay=1`;
+        }
         return isTv
-          ? `https://vidlink.pro/tv/${tmdb || 693134}/${sNum}/${epNum}?autoplay=true&primaryColor=6366f1`
-          : `https://vidlink.pro/movie/${tmdb || 693134}?autoplay=true&primaryColor=6366f1`;
+          ? `https://player.autoembed.co/embed/tv/${tmdb || 693134}/${sNum}/${epNum}?autoplay=1`
+          : `https://player.autoembed.co/embed/movie/${tmdb || 693134}?autoplay=1`;
 
       default:
+        if (currentAllohaUrl) {
+          const l = currentAllohaUrl.startsWith("//") ? `https:${currentAllohaUrl}` : currentAllohaUrl;
+          return appendAutoplay(l);
+        }
+        if (kpId) {
+          return `https://theatre.stravers.live/?kp=${kpId}&autoplay=1`;
+        }
         return isTv
-          ? `https://vidlink.pro/tv/${tmdb || 693134}/${sNum}/${epNum}?autoplay=true&primaryColor=6366f1`
-          : `https://vidlink.pro/movie/${tmdb || 693134}?autoplay=true&primaryColor=6366f1`;
+          ? `https://player.autoembed.co/embed/tv/${tmdb || 693134}/${sNum}/${epNum}?autoplay=1`
+          : `https://player.autoembed.co/embed/movie/${tmdb || 693134}?autoplay=1`;
     }
   };
 
@@ -4884,6 +4923,33 @@ export default function Cinema({
                 ⏩ +10с
               </button>
 
+              <button
+                type="button"
+                className="has-cinema-player-ctrl-btn"
+                onClick={() => {
+                  setPlayerVolumeMax(true);
+                  resetHudTimer();
+                }}
+                title="Максимальная громкость 100%"
+                data-tv-focusable="true"
+                data-tv-row="bottom"
+              >
+                🔊 100%
+              </button>
+
+              <button
+                type="button"
+                className="has-cinema-player-ctrl-btn"
+                onClick={() => {
+                  triggerIframeDirectFocus();
+                }}
+                title="Управление пультом напрямую внутри плеера"
+                data-tv-focusable="true"
+                data-tv-row="bottom"
+              >
+                🎮 Плеер
+              </button>
+
               {(playingMedia || selectedMedia).media_type !== "movie" && (
                 <button
                   type="button"
@@ -4960,7 +5026,7 @@ export default function Cinema({
                       onClick={() => {
                         triedMirrorsRef.current.clear();
                         setAllMirrorsFailed(false);
-                        handleSelectMirror("vidlink_pro");
+                        handleSelectMirror("alloha_ru");
                       }}
                       data-tv-focusable="true"
                     >
@@ -5002,7 +5068,7 @@ export default function Cinema({
                 allow="autoplay *; fullscreen *; encrypted-media *; picture-in-picture *; clipboard-write *"
                 referrerPolicy="no-referrer-when-downgrade"
                 allowFullScreen
-                tabIndex={-1}
+                tabIndex={0}
                 onLoad={handleIframeLoaded}
                 onError={() => handleAutoSwitchNextMirror("Сервер вернул ошибку")}
                 {...{ webkitallowfullscreen: "true", mozallowfullscreen: "true" }}
@@ -5063,7 +5129,6 @@ export default function Cinema({
                         className="has-cinema-drawer-chip primary"
                         onClick={() => {
                           triggerPlayerPlayPause();
-                          setShowPlayerSettings(false);
                         }}
                         data-tv-focusable="true"
                         title="Воспроизведение / Пауза"
@@ -5075,7 +5140,6 @@ export default function Cinema({
                         className="has-cinema-drawer-chip"
                         onClick={() => {
                           triggerPlayerSeek(-10);
-                          setShowPlayerSettings(false);
                         }}
                         data-tv-focusable="true"
                         title="Перемотать на 10 секунд назад"
@@ -5087,7 +5151,6 @@ export default function Cinema({
                         className="has-cinema-drawer-chip"
                         onClick={() => {
                           triggerPlayerSeek(10);
-                          setShowPlayerSettings(false);
                         }}
                         data-tv-focusable="true"
                         title="Перемотать на 10 секунд вперед"
@@ -5099,7 +5162,6 @@ export default function Cinema({
                         className="has-cinema-drawer-chip"
                         onClick={() => {
                           setPlayerVolumeMax(true);
-                          setShowPlayerSettings(false);
                         }}
                         data-tv-focusable="true"
                         title="Выставить громкость плеера на максимум (100%)"
@@ -5111,7 +5173,6 @@ export default function Cinema({
                         className="has-cinema-drawer-chip"
                         onClick={() => {
                           triggerPlayerSeek(20);
-                          setShowPlayerSettings(false);
                         }}
                         data-tv-focusable="true"
                         title="Перемотать заставку на 20 секунд вперед"
@@ -5123,7 +5184,6 @@ export default function Cinema({
                         className="has-cinema-drawer-chip"
                         onClick={() => {
                           triggerPlayerSeek(85);
-                          setShowPlayerSettings(false);
                         }}
                         data-tv-focusable="true"
                         title="Перемотать опенинг / интро на 85 секунд вперед"
@@ -5207,16 +5267,16 @@ export default function Cinema({
                       <button
                         type="button"
                         className={`has-cinema-drawer-option-btn ${
-                          selectedMirror === "vidlink_pro" ? "active" : ""
+                          selectedMirror === "alloha_ru" ? "active" : ""
                         }`}
                         onClick={() => {
-                          handleSelectMirror("vidlink_pro");
-                          showTvToast("Включен Сервер 1: Full HD (1080p)", "⚡", 1500);
+                          handleSelectMirror("alloha_ru");
+                          showTvToast("Включен Сервер 1: Alloha (Русский дубляж)", "🔊", 1500);
                         }}
                         data-tv-focusable="true"
                       >
-                        <span className="option-name">⚡ Сервер 1: VidLink Pro (1080p)</span>
-                        <span className="option-desc">Высокая скорость, Full HD качество, стабильный поток</span>
+                        <span className="option-name">🔊 Сервер 1: Alloha (Русский дубляж)</span>
+                        <span className="option-desc">Полная поддержка пульта, автозапуск, русская озвучка</span>
                       </button>
 
                       <button
@@ -5226,7 +5286,7 @@ export default function Cinema({
                         }`}
                         onClick={() => {
                           handleSelectMirror("kodik_ru");
-                          showTvToast("Включен Сервер 2: Kodik (Дубляж)", "🎙️", 1500);
+                          showTvToast("Включен Сервер 2: Kodik (Студии дубляжа)", "🎙️", 1500);
                         }}
                         data-tv-focusable="true"
                       >
@@ -5234,22 +5294,20 @@ export default function Cinema({
                         <span className="option-desc">Профессиональный русский дубляж (LostFilm, Red Head Sound, HDRezka)</span>
                       </button>
 
-                      {currentAllohaUrl && (
-                        <button
-                          type="button"
-                          className={`has-cinema-drawer-option-btn ${
-                            selectedMirror === "alloha_ru" ? "active" : ""
-                          }`}
-                          onClick={() => {
-                            handleSelectMirror("alloha_ru");
-                            showTvToast("Включен Сервер 3: Alloha", "🔊", 1500);
-                          }}
-                          data-tv-focusable="true"
-                        >
-                          <span className="option-name">🔊 Сервер 3: Alloha Player</span>
-                          <span className="option-desc">Российский балансер кинолент</span>
-                        </button>
-                      )}
+                      <button
+                        type="button"
+                        className={`has-cinema-drawer-option-btn ${
+                          selectedMirror === "vidlink_pro" ? "active" : ""
+                        }`}
+                        onClick={() => {
+                          handleSelectMirror("vidlink_pro");
+                          showTvToast("Включен Сервер 3: VidLink Pro (1080p)", "⚡", 1500);
+                        }}
+                        data-tv-focusable="true"
+                      >
+                        <span className="option-name">⚡ Сервер 3: VidLink Pro (1080p)</span>
+                        <span className="option-desc">Высокая скорость, Full HD качество, стабильный поток</span>
+                      </button>
 
                       {/* Anime-specific AniLibria HLS stream */}
                       {((playingMedia || selectedMedia).genre.toLowerCase().includes("аниме") ||
