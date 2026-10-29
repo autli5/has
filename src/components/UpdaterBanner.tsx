@@ -88,7 +88,7 @@ const isNewerSemver = (remote: string, current: string): boolean => {
 
 export function UpdaterBanner({ isTvEnvironment }: UpdaterBannerProps = {}) {
   const [isTv, setIsTv] = useState<boolean>(() => isTvEnvironment ?? detectTvEnvironment());
-  const [currentAppVersion, setCurrentAppVersion] = useState<string>("0.0.16");
+  const [currentAppVersion, setCurrentAppVersion] = useState<string>("0.0.17");
   const [updateAvailable, setUpdateAvailable] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [downloading, setDownloading] = useState(false);
