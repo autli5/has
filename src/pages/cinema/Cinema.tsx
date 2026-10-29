@@ -697,34 +697,39 @@ export default function Cinema({
     const isPlay = command === "play";
     const isToggle = command === "toggle";
 
-    // 1. Kodik Player API (Supports both object and stringified commands)
-    broadcastToWindowTree({ key: "kodik_player_api", value: { method: isToggle ? "toggle" : (isPlay ? "play" : "pause") } });
-    if (!isToggle) {
-      broadcastToWindowTree({ key: "kodik_player_api", value: { method: isPlay ? "play" : "pause" } });
+    // Отправляем команды многократно для надежности (разные плееры реагируют в разное время)
+    for (let i = 0; i < 3; i++) {
+      setTimeout(() => {
+        // 1. Kodik Player API (Supports both object and stringified commands)
+        broadcastToWindowTree({ key: "kodik_player_api", value: { method: isToggle ? "toggle" : (isPlay ? "play" : "pause") } });
+        if (!isToggle) {
+          broadcastToWindowTree({ key: "kodik_player_api", value: { method: isPlay ? "play" : "pause" } });
+        }
+
+        // 2. Playerjs API (Used by Alloha, Kinoplay, Collaps, VideoCDN, Ashdi, HDRezka)
+        broadcastToWindowTree({ api: isToggle ? "toggle" : (isPlay ? "play" : "pause") });
+        if (!isToggle) {
+          broadcastToWindowTree({ api: isPlay ? "play" : "pause" });
+        }
+
+        // 3. Alloha API
+        broadcastToWindowTree({ action: isPlay ? "play" : "pause" });
+        broadcastToWindowTree({ method: isPlay ? "play" : "pause" });
+
+        // 4. VidLink Pro / Video.js API
+        broadcastToWindowTree({ type: isPlay ? "PLAYER_PLAY" : "PLAYER_PAUSE" });
+        broadcastToWindowTree({ type: isPlay ? "play" : "pause" });
+        broadcastToWindowTree({ action: isPlay ? "play" : "pause" });
+        broadcastToWindowTree({ event: isPlay ? "play" : "pause" });
+
+        // 5. YouTube / VidSrc / AutoEmbed HTML5 API
+        broadcastToWindowTree({ event: "command", func: isPlay ? "playVideo" : "pauseVideo", args: "" });
+
+        // 6. Generic HTML5 postMessage
+        broadcastToWindowTree({ method: isPlay ? "play" : "pause" });
+        broadcastToWindowTree({ command: isPlay ? "play" : "pause" });
+      }, i * 100);
     }
-
-    // 2. Playerjs API (Used by Alloha, Kinoplay, Collaps, VideoCDN, Ashdi, HDRezka)
-    broadcastToWindowTree({ api: isToggle ? "toggle" : (isPlay ? "play" : "pause") });
-    if (!isToggle) {
-      broadcastToWindowTree({ api: isPlay ? "play" : "pause" });
-    }
-
-    // 3. Alloha API
-    broadcastToWindowTree({ action: isPlay ? "play" : "pause" });
-    broadcastToWindowTree({ method: isPlay ? "play" : "pause" });
-
-    // 4. VidLink Pro / Video.js API
-    broadcastToWindowTree({ type: isPlay ? "PLAYER_PLAY" : "PLAYER_PAUSE" });
-    broadcastToWindowTree({ type: isPlay ? "play" : "pause" });
-    broadcastToWindowTree({ action: isPlay ? "play" : "pause" });
-    broadcastToWindowTree({ event: isPlay ? "play" : "pause" });
-
-    // 5. YouTube / VidSrc / AutoEmbed HTML5 API
-    broadcastToWindowTree({ event: "command", func: isPlay ? "playVideo" : "pauseVideo", args: "" });
-
-    // 6. Generic HTML5 postMessage
-    broadcastToWindowTree({ method: isPlay ? "play" : "pause" });
-    broadcastToWindowTree({ command: isPlay ? "play" : "pause" });
   }, [broadcastToWindowTree]);
 
   const setPlayerVolumeMax = useCallback((showToast: boolean = false) => {
@@ -802,7 +807,10 @@ export default function Cinema({
         }, 120);
       }
     }
+    // Установка громкости 100% каждый раз при воспроизведении
     setPlayerVolumeMax(false);
+    setTimeout(() => setPlayerVolumeMax(false), 500);
+    setTimeout(() => setPlayerVolumeMax(false), 1500);
     setIsPlayingState(true);
     showTvToast("Воспроизведение", "▶", 1200);
   }, [sendIframePlaybackCommand, setPlayerVolumeMax, showTvToast]);
@@ -846,39 +854,44 @@ export default function Cinema({
       const targetTime = Math.max(0, curTime + secondsDelta);
       currentPlaybackRef.current.currentTime = targetTime;
 
-      // 1. Kodik API (Seek to absolute seconds & relative seek delta)
-      broadcastToWindowTree({ key: "kodik_player_api", value: { method: "seek", time: targetTime } });
-      broadcastToWindowTree({ key: "kodik_player_api", value: { method: "seek_delta", time: secondsDelta } });
-      broadcastToWindowTree({ key: "kodik_player_api", value: { method: secondsDelta > 0 ? "forward" : "rewind", time: Math.abs(secondsDelta) } });
+      // Отправляем команды перемотки несколько раз для надежности
+      for (let i = 0; i < 3; i++) {
+        setTimeout(() => {
+          // 1. Kodik API (Seek to absolute seconds & relative seek delta)
+          broadcastToWindowTree({ key: "kodik_player_api", value: { method: "seek", time: targetTime } });
+          broadcastToWindowTree({ key: "kodik_player_api", value: { method: "seek_delta", time: secondsDelta } });
+          broadcastToWindowTree({ key: "kodik_player_api", value: { method: secondsDelta > 0 ? "forward" : "rewind", time: Math.abs(secondsDelta) } });
 
-      // 2. Playerjs API (Used by Alloha, Kinoplay, Collaps, VideoCDN, Ashdi, HDRezka)
-      broadcastToWindowTree({ api: "seek", set: targetTime });
-      broadcastToWindowTree({ api: "seek", set: secondsDelta > 0 ? `+${secondsDelta}` : `${secondsDelta}` });
-      broadcastToWindowTree({ api: "seek", time: targetTime });
-      broadcastToWindowTree({ api: "seek", delta: secondsDelta });
-      broadcastToWindowTree({ api: "seek_delta", time: secondsDelta });
+          // 2. Playerjs API (Used by Alloha, Kinoplay, Collaps, VideoCDN, Ashdi, HDRezka)
+          broadcastToWindowTree({ api: "seek", set: targetTime });
+          broadcastToWindowTree({ api: "seek", set: secondsDelta > 0 ? `+${secondsDelta}` : `${secondsDelta}` });
+          broadcastToWindowTree({ api: "seek", time: targetTime });
+          broadcastToWindowTree({ api: "seek", delta: secondsDelta });
+          broadcastToWindowTree({ api: "seek_delta", time: secondsDelta });
 
-      // 3. Alloha API
-      broadcastToWindowTree({ action: "seek", time: targetTime });
-      broadcastToWindowTree({ action: "seek", delta: secondsDelta });
-      broadcastToWindowTree({ method: "seek", time: targetTime });
-      broadcastToWindowTree({ method: "seekTo", value: targetTime });
+          // 3. Alloha API
+          broadcastToWindowTree({ action: "seek", time: targetTime });
+          broadcastToWindowTree({ action: "seek", delta: secondsDelta });
+          broadcastToWindowTree({ method: "seek", time: targetTime });
+          broadcastToWindowTree({ method: "seekTo", value: targetTime });
 
-      // 4. VidLink Pro / Video.js API
-      broadcastToWindowTree({ type: "SEEK", data: { time: targetTime } });
-      broadcastToWindowTree({ type: "PLAYER_SEEK", time: targetTime });
-      broadcastToWindowTree({ type: "seek", time: targetTime });
-      broadcastToWindowTree({ action: "seek", time: targetTime });
-      broadcastToWindowTree({ action: "seek", delta: secondsDelta });
+          // 4. VidLink Pro / Video.js API
+          broadcastToWindowTree({ type: "SEEK", data: { time: targetTime } });
+          broadcastToWindowTree({ type: "PLAYER_SEEK", time: targetTime });
+          broadcastToWindowTree({ type: "seek", time: targetTime });
+          broadcastToWindowTree({ action: "seek", time: targetTime });
+          broadcastToWindowTree({ action: "seek", delta: secondsDelta });
 
-      // 5. YouTube / VidSrc / AutoEmbed HTML5 API
-      broadcastToWindowTree({ event: "command", func: "seekTo", args: [targetTime, true] });
-      broadcastToWindowTree({ event: "command", func: "seek", args: [targetTime] });
-      broadcastToWindowTree({ action: "seekTo", value: targetTime });
+          // 5. YouTube / VidSrc / AutoEmbed HTML5 API
+          broadcastToWindowTree({ event: "command", func: "seekTo", args: [targetTime, true] });
+          broadcastToWindowTree({ event: "command", func: "seek", args: [targetTime] });
+          broadcastToWindowTree({ action: "seekTo", value: targetTime });
 
-      // 6. Generic HTML5 postMessage
-      broadcastToWindowTree({ method: "seek", time: targetTime });
-      broadcastToWindowTree({ command: "seek", time: targetTime });
+          // 6. Generic HTML5 postMessage
+          broadcastToWindowTree({ method: "seek", time: targetTime });
+          broadcastToWindowTree({ command: "seek", time: targetTime });
+        }, i * 100);
+      }
     }
     showTvToast(secondsDelta > 0 ? `+${secondsDelta} сек` : `${secondsDelta} сек`, secondsDelta > 0 ? "⏩" : "⏪", 1000);
   }, [broadcastToWindowTree, showTvToast]);
@@ -1684,6 +1697,11 @@ export default function Cinema({
     setTimeout(() => {
       setPlayerVolumeMax(false);
     }, 4500);
+    // Агрессивная установка громкости каждые 3 секунды (первые 15 секунд)
+    const volumeInterval = setInterval(() => {
+      setPlayerVolumeMax(false);
+    }, 3000);
+    setTimeout(() => clearInterval(volumeInterval), 15000);
   }, [sendIframePlaybackCommand, setPlayerVolumeMax]);
 
   // Start playback for a media item (movie or specific series episode)
@@ -1976,6 +1994,16 @@ export default function Cinema({
     const activeMedia = playingMedia || selectedMedia;
     currentPlaybackRef.current = { currentTime, duration };
 
+    // Постоянно поддерживаем громкость на 100% для нативного видео
+    try {
+      if (videoRef.current.volume !== 1.0) {
+        videoRef.current.volume = 1.0;
+      }
+      if (videoRef.current.muted) {
+        videoRef.current.muted = false;
+      }
+    } catch {}
+
     if (duration > 0 && isTauri) {
       const payload: CinemaPlayback = {
         title_id: activeMedia.id,
@@ -2118,6 +2146,18 @@ export default function Cinema({
 
     return () => clearInterval(interval);
   }, [playingEpisode, playerMode, allMirrorsFailed, playingMedia, selectedMedia, playingSeasonNumber, isTauri, currentUser?.email]);
+
+  // Постоянный мониторинг и поддержание громкости на 100% во время воспроизведения
+  useEffect(() => {
+    if (!playingEpisode) return;
+
+    // Устанавливаем громкость каждые 2 секунды во время воспроизведения
+    const volumeKeeper = setInterval(() => {
+      setPlayerVolumeMax(false);
+    }, 2000);
+
+    return () => clearInterval(volumeKeeper);
+  }, [playingEpisode, setPlayerVolumeMax]);
 
   // Listen to postMessage from embedded players (VidLink, Kodik, Alloha)
   useEffect(() => {
