@@ -22,8 +22,6 @@ interface UpdaterBannerProps {
 // Helper for Smart TV / Android TV detection
 const detectTvEnvironment = (): boolean => {
   if (typeof window === "undefined") return false;
-  const saved = localStorage.getItem("has_tv_mode");
-  if (saved !== null) return saved === "true";
   const ua = (navigator.userAgent || "").toLowerCase();
   const isTvUa =
     ua.includes("android tv") ||
@@ -50,6 +48,17 @@ const detectTvEnvironment = (): boolean => {
   const isAndroid = ua.includes("android");
   const noTouch = !("ontouchstart" in window) && navigator.maxTouchPoints === 0;
   if (isAndroid && noTouch) return true;
+
+  // On pure desktop (macOS / Windows / Desktop Linux), default to desktop PC mode
+  const isDesktop =
+    (ua.includes("windows nt") || ua.includes("macintosh") || (ua.includes("linux") && !ua.includes("android"))) &&
+    !isTvUa;
+  if (isDesktop) {
+    return localStorage.getItem("has_tv_mode_manual") === "true";
+  }
+
+  const saved = localStorage.getItem("has_tv_mode");
+  if (saved !== null) return saved === "true";
   return false;
 };
 
@@ -88,7 +97,7 @@ const isNewerSemver = (remote: string, current: string): boolean => {
 
 export function UpdaterBanner({ isTvEnvironment }: UpdaterBannerProps = {}) {
   const [isTv, setIsTv] = useState<boolean>(() => isTvEnvironment ?? detectTvEnvironment());
-  const [currentAppVersion, setCurrentAppVersion] = useState<string>("0.0.18");
+  const [currentAppVersion, setCurrentAppVersion] = useState<string>("0.0.19");
   const [updateAvailable, setUpdateAvailable] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [downloading, setDownloading] = useState(false);

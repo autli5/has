@@ -55,6 +55,7 @@ interface DashboardProps {
   dbInfo: SafeDbInfo | null;
   dbStatus: DbStatus | null;
   onLogout: () => void;
+  isTvEnvironment?: boolean;
 }
 
 type NavTab = "cinema" | "home" | "users" | "settings" | "profile" | "help";
@@ -62,8 +63,6 @@ type NavTab = "cinema" | "home" | "users" | "settings" | "profile" | "help";
 // Helper for Smart TV / Android TV detection
 const detectTvEnvironment = (): boolean => {
   if (typeof window === "undefined") return false;
-  const saved = localStorage.getItem("has_tv_mode");
-  if (saved !== null) return saved === "true";
   const ua = (navigator.userAgent || "").toLowerCase();
   const isTvUa =
     ua.includes("android tv") ||
@@ -90,6 +89,17 @@ const detectTvEnvironment = (): boolean => {
   const isAndroid = ua.includes("android");
   const noTouch = !("ontouchstart" in window) && navigator.maxTouchPoints === 0;
   if (isAndroid && noTouch) return true;
+
+  // On pure desktop (macOS / Windows / Desktop Linux), default to desktop PC mode
+  const isDesktop =
+    (ua.includes("windows nt") || ua.includes("macintosh") || (ua.includes("linux") && !ua.includes("android"))) &&
+    !isTvUa;
+  if (isDesktop) {
+    return localStorage.getItem("has_tv_mode_manual") === "true";
+  }
+
+  const saved = localStorage.getItem("has_tv_mode");
+  if (saved !== null) return saved === "true";
   return false;
 };
 
@@ -98,13 +108,23 @@ export default function Dashboard({
   dbInfo,
   dbStatus,
   onLogout,
+  isTvEnvironment: propIsTv,
 }: DashboardProps) {
   const [currentUser, setCurrentUser] = useState<UserDto>(user);
   useEffect(() => {
     setCurrentUser(user);
   }, [user]);
 
-  const [isTvEnvironment, setIsTvEnvironment] = useState<boolean>(detectTvEnvironment);
+  const [isTvEnvironment, setIsTvEnvironment] = useState<boolean>(() => {
+    return propIsTv !== undefined ? propIsTv : detectTvEnvironment();
+  });
+
+  useEffect(() => {
+    if (propIsTv !== undefined && propIsTv !== isTvEnvironment) {
+      setIsTvEnvironment(propIsTv);
+    }
+  }, [propIsTv, isTvEnvironment]);
+
   const [activeTab, setActiveTab] = useState<NavTab>("cinema");
   const [serverUsers, setServerUsers] = useState<ServerUserDto[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
@@ -112,21 +132,6 @@ export default function Dashboard({
     return localStorage.getItem("has_sidebar_collapsed") === "true";
   });
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-
-  // Dynamic D-Pad Remote Control Key Listener (Auto-detects TV when user presses remote buttons)
-  useEffect(() => {
-    const handleRemoteDpadKey = (e: KeyboardEvent) => {
-      const isRemoteKey =
-        [19, 20, 21, 22, 23, 4, 82, 85, 179].includes(e.keyCode) ||
-        ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key);
-      if (isRemoteKey && !isTvEnvironment) {
-        setIsTvEnvironment(true);
-        localStorage.setItem("has_tv_mode", "true");
-      }
-    };
-    window.addEventListener("keydown", handleRemoteDpadKey);
-    return () => window.removeEventListener("keydown", handleRemoteDpadKey);
-  }, [isTvEnvironment]);
 
   const handleNavClick = (tab: NavTab) => {
     setActiveTab(tab);

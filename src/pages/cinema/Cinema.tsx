@@ -493,8 +493,6 @@ const formatMediaImg = (path: string | undefined, size: "w500" | "original" = "w
 // Detect Android TV / Smart TV user agent or previous user preference
 const detectTvEnvironment = (): boolean => {
   if (typeof window === "undefined") return false;
-  const saved = localStorage.getItem("has_tv_mode");
-  if (saved !== null) return saved === "true";
   const ua = (navigator.userAgent || "").toLowerCase();
   const isTvUa =
     ua.includes("android tv") ||
@@ -521,6 +519,17 @@ const detectTvEnvironment = (): boolean => {
   const isAndroid = ua.includes("android");
   const noTouch = !("ontouchstart" in window) && navigator.maxTouchPoints === 0;
   if (isAndroid && noTouch) return true;
+
+  // On pure desktop (macOS / Windows / Desktop Linux), default to desktop PC mode
+  const isDesktop =
+    (ua.includes("windows nt") || ua.includes("macintosh") || (ua.includes("linux") && !ua.includes("android"))) &&
+    !isTvUa;
+  if (isDesktop) {
+    return localStorage.getItem("has_tv_mode_manual") === "true";
+  }
+
+  const saved = localStorage.getItem("has_tv_mode");
+  if (saved !== null) return saved === "true";
   return false;
 };
 
@@ -540,10 +549,10 @@ export default function Cinema({
   const lastFocusedCardRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
-    if (isTvEnvironment && !isTvMode) {
-      setIsTvMode(true);
+    if (isTvEnvironment !== isTvMode) {
+      setIsTvMode(isTvEnvironment);
     }
-  }, [isTvEnvironment, isTvMode]);
+  }, [isTvEnvironment]);
   const [tvToast, setTvToast] = useState<{ text: string; icon?: string } | null>(null);
   const tvToastTimerRef = useRef<any>(null);
 
@@ -563,6 +572,7 @@ export default function Cinema({
     setIsTvMode((prev) => {
       const next = !prev;
       localStorage.setItem("has_tv_mode", String(next));
+      localStorage.setItem("has_tv_mode_manual", String(next));
       showTvToast(next ? "ТВ-Режим включен (10-Foot UI)" : "ПК-Режим включен", "📺", 2500);
       playTvBeep(next ? 750 : 400, 0.05);
       return next;
@@ -2250,40 +2260,18 @@ export default function Cinema({
   // D-Pad Spatial Navigation & TV Remote Key Handler
   const handleRemoteKeyDown = useCallback(
     (e: KeyboardEvent) => {
-      // Auto-activate TV mode immediately on ANY remote control button press
-      const isRemoteKey =
-        [19, 20, 21, 22, 23, 4, 82, 85, 179].includes(e.keyCode) ||
-        ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key);
-      if (isRemoteKey && !isTvMode) {
-        setIsTvMode(true);
-        localStorage.setItem("has_tv_mode", "true");
-      }
-
       const isInput =
         document.activeElement instanceof HTMLInputElement ||
         document.activeElement instanceof HTMLTextAreaElement;
 
-      // Android TV / Remote key mappings
-      const isBack =
-        e.key === "Escape" ||
-        e.key === "GoBack" ||
-        e.key === "BrowserBack" ||
-        e.keyCode === 4 ||
-        e.keyCode === 27;
-      const isOk =
-        e.key === "Enter" ||
-        e.key === "Select" ||
-        e.key === "Accept" ||
-        e.keyCode === 13 ||
-        e.keyCode === 23 ||
-        e.keyCode === 66;
-      const isPlayPause =
-        e.key === "MediaPlayPause" || e.keyCode === 85 || e.keyCode === 179;
-      const isFastForward = e.key === "MediaFastForward" || e.keyCode === 90;
-      const isRewind = e.key === "MediaRewind" || e.keyCode === 89;
+      // Remote Menu key (ONLY in TV Mode, and NEVER for the 'R' key on PC keyboard!)
+      const isMenuKey =
+        !isInput &&
+        (e.key === "Menu" ||
+          e.key === "ContextMenu" ||
+          (isTvMode && e.keyCode === 82 && e.key !== "r" && e.key !== "R" && e.code !== "KeyR"));
 
-      // Remote Menu key (Android TV remote Menu button / ContextMenu)
-      if (e.key === "Menu" || e.keyCode === 82 || e.key === "ContextMenu") {
+      if (isTvMode && isMenuKey) {
         e.preventDefault();
         setIsTvNavOpen((prev) => {
           const next = !prev;
@@ -2309,6 +2297,29 @@ export default function Cinema({
         toggleTvMode();
         return;
       }
+
+      // Android TV / Remote key mappings
+      const isBack =
+        e.key === "Escape" ||
+        e.key === "GoBack" ||
+        e.key === "BrowserBack" ||
+        (isTvMode && e.keyCode === 4) ||
+        e.keyCode === 27;
+      const isOk =
+        e.key === "Enter" ||
+        e.key === "Select" ||
+        e.key === "Accept" ||
+        e.keyCode === 13 ||
+        (isTvMode && (e.keyCode === 23 || (e.keyCode === 66 && e.code !== "KeyB")));
+      const isPlayPause =
+        e.key === "MediaPlayPause" ||
+        (isTvMode && (e.keyCode === 85 || e.keyCode === 179) && e.code !== "KeyU");
+      const isFastForward =
+        e.key === "MediaFastForward" ||
+        (isTvMode && e.keyCode === 90 && e.code !== "KeyZ");
+      const isRewind =
+        e.key === "MediaRewind" ||
+        (isTvMode && e.keyCode === 89 && e.code !== "KeyY");
 
       // 1. In-player remote control
       if (playingEpisode !== null) {

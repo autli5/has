@@ -27,8 +27,6 @@ const isTauri = () => {
 // Helper for Smart TV / Android TV detection
 const detectTvEnvironment = (): boolean => {
   if (typeof window === "undefined") return false;
-  const saved = localStorage.getItem("has_tv_mode");
-  if (saved !== null) return saved === "true";
   const ua = (navigator.userAgent || "").toLowerCase();
   const isTvUa =
     ua.includes("android tv") ||
@@ -55,6 +53,17 @@ const detectTvEnvironment = (): boolean => {
   const isAndroid = ua.includes("android");
   const noTouch = !("ontouchstart" in window) && navigator.maxTouchPoints === 0;
   if (isAndroid && noTouch) return true;
+
+  // On pure desktop (macOS / Windows / Desktop Linux), default to desktop PC mode
+  const isDesktop =
+    (ua.includes("windows nt") || ua.includes("macintosh") || (ua.includes("linux") && !ua.includes("android"))) &&
+    !isTvUa;
+  if (isDesktop) {
+    return localStorage.getItem("has_tv_mode_manual") === "true";
+  }
+
+  const saved = localStorage.getItem("has_tv_mode");
+  if (saved !== null) return saved === "true";
   return false;
 };
 
@@ -142,21 +151,6 @@ export default function App() {
 
     // Check DB status on startup
     checkDatabase();
-  }, [isTvEnvironment]);
-
-  // Activate TV mode immediately upon any remote control key press
-  useEffect(() => {
-    const handleRemoteKey = (e: KeyboardEvent) => {
-      const isRemoteKey =
-        [19, 20, 21, 22, 23, 4, 82, 85, 179].includes(e.keyCode) ||
-        ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key);
-      if (isRemoteKey && !isTvEnvironment) {
-        setIsTvEnvironment(true);
-        localStorage.setItem("has_tv_mode", "true");
-      }
-    };
-    window.addEventListener("keydown", handleRemoteKey);
-    return () => window.removeEventListener("keydown", handleRemoteKey);
   }, [isTvEnvironment]);
 
   // Countdown timer for OTP re-send in resetStage 2
@@ -525,6 +519,7 @@ export default function App() {
           dbInfo={dbInfo}
           dbStatus={dbStatus}
           onLogout={handleLogout}
+          isTvEnvironment={isTvEnvironment}
         />
       </>
     );
@@ -542,6 +537,7 @@ export default function App() {
           onSwitchToDesktop={() => {
             setIsTvEnvironment(false);
             localStorage.setItem("has_tv_mode", "false");
+            localStorage.setItem("has_tv_mode_manual", "false");
           }}
         />
       </>
@@ -812,6 +808,7 @@ export default function App() {
                 onClick={() => {
                   setIsTvEnvironment(true);
                   localStorage.setItem("has_tv_mode", "true");
+                  localStorage.setItem("has_tv_mode_manual", "true");
                 }}
                 title="Перейти в режим Android TV (выбор профилей)"
                 style={{
