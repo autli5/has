@@ -73,8 +73,7 @@ jobs:
           args: ${{ matrix.target && format('--target {0}', matrix.target) || '' }}
 
   release-android:
-    needs: release
-    if: always() && (needs.release.result == 'success' || needs.release.result == 'skipped')
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     permissions:
       contents: write
     runs-on: ubuntu-latest
