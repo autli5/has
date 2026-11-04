@@ -630,6 +630,421 @@ pub async fn filter_playable_media(items: Vec<PlayableCheckItem>) -> Result<Vec<
     Ok(playable_ids)
 }
 
+// ---------------------------------------------------------
+// Watch Together (Совместный просмотр) Room Sync System
+// ---------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RoomParticipant {
+    pub user_email: String,
+    pub user_name: String,
+    pub is_host: bool,
+    pub last_seen_epoch: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WatchRoom {
+    pub room_code: String,
+    pub host_email: String,
+    pub host_name: String,
+    pub media_id: String,
+    pub media_title: String,
+    pub media_type: String,
+    pub poster_path: Option<String>,
+    pub season: u32,
+    pub episode: u32,
+    pub current_time_seconds: f64,
+    pub is_playing: bool,
+    pub updated_by: String,
+    pub updated_at_epoch: i64,
+    pub participants: Vec<RoomParticipant>,
+}
+
+fn get_now_epoch_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64
+}
+
+fn generate_room_code() -> String {
+    use std::hash::{BuildHasher, Hasher};
+    let hasher = std::collections::hash_map::RandomState::new().build_hasher().finish();
+    format!("{:06}", (hasher % 900_000) + 100_000)
+}
+
+async fn ensure_cinema_rooms_table(client: &tokio_postgres::Client) {
+    let ddl = r#"
+        CREATE TABLE IF NOT EXISTS cinema_rooms (
+            room_code VARCHAR(16) PRIMARY KEY,
+            host_email VARCHAR(255) NOT NULL,
+            host_name VARCHAR(255) NOT NULL,
+            media_id VARCHAR(255) NOT NULL,
+            media_title TEXT NOT NULL,
+            media_type VARCHAR(32) NOT NULL DEFAULT 'movie',
+            poster_path TEXT,
+            season INT NOT NULL DEFAULT 1,
+            episode INT NOT NULL DEFAULT 1,
+            current_time_seconds DOUBLE PRECISION NOT NULL DEFAULT 0,
+            is_playing BOOLEAN NOT NULL DEFAULT false,
+            updated_by VARCHAR(255) NOT NULL,
+            updated_at_epoch BIGINT NOT NULL,
+            participants_json TEXT NOT NULL DEFAULT '[]',
+            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+            last_active TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+        );
+    "#;
+    let _ = client.batch_execute(ddl).await;
+}
+
+pub async fn db_save_room(room: &WatchRoom) -> Result<(), String> {
+    let config = crate::auth::get_db_config();
+    let client = crate::auth::connect_to_db(&config)
+        .await
+        .map_err(|e| format!("Ошибка подключения к БД комнат: {}", e))?;
+
+    ensure_cinema_rooms_table(&client).await;
+
+    let participants_json = serde_json::to_string(&room.participants).unwrap_or_else(|_| "[]".to_string());
+    let season_i32 = room.season as i32;
+    let episode_i32 = room.episode as i32;
+
+    let res = client.execute(
+        r#"
+        INSERT INTO cinema_rooms (
+            room_code, host_email, host_name, media_id, media_title, media_type,
+            poster_path, season, episode, current_time_seconds, is_playing,
+            updated_by, updated_at_epoch, participants_json, last_active
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, CURRENT_TIMESTAMP)
+        ON CONFLICT (room_code) DO UPDATE SET
+            media_id = EXCLUDED.media_id,
+            media_title = EXCLUDED.media_title,
+            media_type = EXCLUDED.media_type,
+            poster_path = EXCLUDED.poster_path,
+            season = EXCLUDED.season,
+            episode = EXCLUDED.episode,
+            current_time_seconds = EXCLUDED.current_time_seconds,
+            is_playing = EXCLUDED.is_playing,
+            updated_by = EXCLUDED.updated_by,
+            updated_at_epoch = EXCLUDED.updated_at_epoch,
+            participants_json = EXCLUDED.participants_json,
+            last_active = CURRENT_TIMESTAMP;
+        "#,
+        &[
+            &room.room_code,
+            &room.host_email,
+            &room.host_name,
+            &room.media_id,
+            &room.media_title,
+            &room.media_type,
+            &room.poster_path,
+            &season_i32,
+            &episode_i32,
+            &room.current_time_seconds,
+            &room.is_playing,
+            &room.updated_by,
+            &room.updated_at_epoch,
+            &participants_json,
+        ],
+    ).await;
+
+    if res.is_err() {
+        // Fallback into server_notes table
+        let title = format!("__cinema_room_{}__", room.room_code);
+        let room_json = serde_json::to_string(room).map_err(|e| e.to_string())?;
+        let _ = client.execute(
+            "DELETE FROM server_notes WHERE title = $1;",
+            &[&title],
+        ).await;
+        client.execute(
+            "INSERT INTO server_notes (user_email, title, content) VALUES ($1, $2, $3);",
+            &[&room.host_email, &title, &room_json],
+        ).await.map_err(|e| format!("Не удалось сохранить комнату: {}", e))?;
+    }
+
+    Ok(())
+}
+
+pub async fn db_get_room(room_code: &str) -> Result<Option<WatchRoom>, String> {
+    let clean_code = room_code.trim();
+    if clean_code.is_empty() {
+        return Ok(None);
+    }
+
+    let config = crate::auth::get_db_config();
+    let client = crate::auth::connect_to_db(&config)
+        .await
+        .map_err(|e| format!("Ошибка подключения к БД: {}", e))?;
+
+    ensure_cinema_rooms_table(&client).await;
+
+    let row_res = client.query_opt(
+        r#"
+        SELECT room_code, host_email, host_name, media_id, media_title, media_type,
+               poster_path, season, episode, current_time_seconds, is_playing,
+               updated_by, updated_at_epoch, participants_json
+        FROM cinema_rooms
+        WHERE room_code = $1;
+        "#,
+        &[&clean_code],
+    ).await;
+
+    if let Ok(Some(row)) = row_res {
+        let r_code: String = row.get(0);
+        let host_email: String = row.get(1);
+        let host_name: String = row.get(2);
+        let media_id: String = row.get(3);
+        let media_title: String = row.get(4);
+        let media_type: String = row.get(5);
+        let poster_path: Option<String> = row.get(6);
+        let season: i32 = row.get(7);
+        let episode: i32 = row.get(8);
+        let current_time_seconds: f64 = row.get(9);
+        let is_playing: bool = row.get(10);
+        let updated_by: String = row.get(11);
+        let updated_at_epoch: i64 = row.get(12);
+        let participants_raw: String = row.get(13);
+        let participants: Vec<RoomParticipant> = serde_json::from_str(&participants_raw).unwrap_or_default();
+
+        return Ok(Some(WatchRoom {
+            room_code: r_code,
+            host_email,
+            host_name,
+            media_id,
+            media_title,
+            media_type,
+            poster_path,
+            season: season.max(1) as u32,
+            episode: episode.max(1) as u32,
+            current_time_seconds,
+            is_playing,
+            updated_by,
+            updated_at_epoch,
+            participants,
+        }));
+    }
+
+    // Fallback: check server_notes
+    let title = format!("__cinema_room_{}__", clean_code);
+    if let Ok(Some(row)) = client.query_opt(
+        "SELECT content FROM server_notes WHERE title = $1 ORDER BY id DESC LIMIT 1;",
+        &[&title],
+    ).await {
+        let content: String = row.get(0);
+        if let Ok(room) = serde_json::from_str::<WatchRoom>(&content) {
+            return Ok(Some(room));
+        }
+    }
+
+    Ok(None)
+}
+
+#[tauri::command]
+pub async fn create_cinema_room(
+    user_email: String,
+    user_name: String,
+    media_id: String,
+    media_title: String,
+    media_type: String,
+    poster_path: Option<String>,
+    season: u32,
+    episode: u32,
+    current_time_seconds: f64,
+    is_playing: bool,
+) -> Result<WatchRoom, String> {
+    let now = get_now_epoch_ms();
+    let room_code = generate_room_code();
+
+    let participant = RoomParticipant {
+        user_email: user_email.clone(),
+        user_name: user_name.clone(),
+        is_host: true,
+        last_seen_epoch: now,
+    };
+
+    let room = WatchRoom {
+        room_code: room_code.clone(),
+        host_email: user_email.clone(),
+        host_name: user_name.clone(),
+        media_id,
+        media_title,
+        media_type,
+        poster_path,
+        season,
+        episode,
+        current_time_seconds,
+        is_playing,
+        updated_by: user_name,
+        updated_at_epoch: now,
+        participants: vec![participant],
+    };
+
+    db_save_room(&room).await?;
+    Ok(room)
+}
+
+#[tauri::command]
+pub async fn join_cinema_room(
+    room_code: String,
+    user_email: String,
+    user_name: String,
+) -> Result<WatchRoom, String> {
+    let clean_code = room_code.trim().to_string();
+    let mut room = db_get_room(&clean_code)
+        .await?
+        .ok_or_else(|| format!("Комната с кодом {} не найдена", clean_code))?;
+
+    let now = get_now_epoch_ms();
+    let user_email_clean = user_email.trim().to_lowercase();
+
+    // Check if participant already in room
+    let mut found = false;
+    for p in &mut room.participants {
+        if p.user_email.trim().to_lowercase() == user_email_clean {
+            p.user_name = user_name.clone();
+            p.last_seen_epoch = now;
+            found = true;
+            break;
+        }
+    }
+
+    if !found {
+        room.participants.push(RoomParticipant {
+            user_email: user_email.clone(),
+            user_name,
+            is_host: false,
+            last_seen_epoch: now,
+        });
+    }
+
+    db_save_room(&room).await?;
+    Ok(room)
+}
+
+#[tauri::command]
+pub async fn get_cinema_room(
+    room_code: String,
+    user_email: String,
+) -> Result<Option<WatchRoom>, String> {
+    let clean_code = room_code.trim();
+    if clean_code.is_empty() {
+        return Ok(None);
+    }
+
+    let mut room = match db_get_room(clean_code).await? {
+        Some(r) => r,
+        None => return Ok(None),
+    };
+
+    let now = get_now_epoch_ms();
+    let user_email_clean = user_email.trim().to_lowercase();
+
+    // Update heartbeat for current user
+    let mut updated_participant = false;
+    for p in &mut room.participants {
+        if !user_email_clean.is_empty() && p.user_email.trim().to_lowercase() == user_email_clean {
+            p.last_seen_epoch = now;
+            updated_participant = true;
+        }
+    }
+
+    // Filter stale participants (> 120s inactive)
+    room.participants.retain(|p| (now - p.last_seen_epoch) < 120_000);
+
+    if updated_participant {
+        let _ = db_save_room(&room).await;
+    }
+
+    Ok(Some(room))
+}
+
+#[tauri::command]
+pub async fn sync_cinema_room(
+    room_code: String,
+    user_email: String,
+    user_name: String,
+    current_time_seconds: Option<f64>,
+    is_playing: Option<bool>,
+    season: Option<u32>,
+    episode: Option<u32>,
+) -> Result<WatchRoom, String> {
+    let clean_code = room_code.trim().to_string();
+    let mut room = db_get_room(&clean_code)
+        .await?
+        .ok_or_else(|| format!("Комната {} не найдена", clean_code))?;
+
+    let now = get_now_epoch_ms();
+
+    if let Some(t) = current_time_seconds {
+        room.current_time_seconds = t;
+    }
+    if let Some(play) = is_playing {
+        room.is_playing = play;
+    }
+    if let Some(s) = season {
+        room.season = s;
+    }
+    if let Some(ep) = episode {
+        room.episode = ep;
+    }
+
+    room.updated_by = if !user_name.trim().is_empty() {
+        user_name.clone()
+    } else {
+        user_email.clone()
+    };
+    room.updated_at_epoch = now;
+
+    // Refresh heartbeat
+    let user_email_clean = user_email.trim().to_lowercase();
+    for p in &mut room.participants {
+        if p.user_email.trim().to_lowercase() == user_email_clean {
+            p.last_seen_epoch = now;
+            if !user_name.trim().is_empty() {
+                p.user_name = user_name.clone();
+            }
+        }
+    }
+
+    db_save_room(&room).await?;
+    Ok(room)
+}
+
+#[tauri::command]
+pub async fn leave_cinema_room(
+    room_code: String,
+    user_email: String,
+) -> Result<bool, String> {
+    let clean_code = room_code.trim().to_string();
+    let mut room = match db_get_room(&clean_code).await? {
+        Some(r) => r,
+        None => return Ok(true),
+    };
+
+    let user_email_clean = user_email.trim().to_lowercase();
+    room.participants.retain(|p| p.user_email.trim().to_lowercase() != user_email_clean);
+
+    if room.participants.is_empty() {
+        // Room is empty - clean up
+        let config = crate::auth::get_db_config();
+        if let Ok(client) = crate::auth::connect_to_db(&config).await {
+            let _ = client.execute("DELETE FROM cinema_rooms WHERE room_code = $1;", &[&clean_code]).await;
+            let title = format!("__cinema_room_{}__", clean_code);
+            let _ = client.execute("DELETE FROM server_notes WHERE title = $1;", &[&title]).await;
+        }
+    } else {
+        // Transfer host if host left
+        if room.host_email.trim().to_lowercase() == user_email_clean && !room.participants.is_empty() {
+            room.participants[0].is_host = true;
+            room.host_email = room.participants[0].user_email.clone();
+            room.host_name = room.participants[0].user_name.clone();
+        }
+        let _ = db_save_room(&room).await;
+    }
+
+    Ok(true)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

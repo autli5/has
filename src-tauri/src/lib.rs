@@ -399,6 +399,11 @@ pub fn run() {
             cinema::tmdb_query,
             cinema::get_russian_media_info,
             cinema::filter_playable_media,
+            cinema::create_cinema_room,
+            cinema::join_cinema_room,
+            cinema::get_cinema_room,
+            cinema::sync_cinema_room,
+            cinema::leave_cinema_room,
             check_app_update
         ])
         .run(tauri::generate_context!())

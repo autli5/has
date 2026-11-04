@@ -469,6 +469,30 @@ interface RussianMediaInfo {
   russian_title?: string | null;
 }
 
+interface RoomParticipant {
+  user_email: string;
+  user_name: string;
+  is_host: boolean;
+  last_seen_epoch: number;
+}
+
+interface WatchRoom {
+  room_code: string;
+  host_email: string;
+  host_name: string;
+  media_id: string;
+  media_title: string;
+  media_type: string;
+  poster_path?: string | null;
+  season: number;
+  episode: number;
+  current_time_seconds: number;
+  is_playing: boolean;
+  updated_by: string;
+  updated_at_epoch: number;
+  participants: RoomParticipant[];
+}
+
 type BalancerMirror =
   | "vidlink_pro"
   | "kodik_ru"
@@ -664,6 +688,18 @@ export default function Cinema({
 
   const [isPlayingState, setIsPlayingState] = useState(true);
 
+  // Watch Together (Совместный просмотр) Room State
+  const [activeWatchRoom, setActiveWatchRoom] = useState<WatchRoom | null>(null);
+  const [showWatchRoomModal, setShowWatchRoomModal] = useState<boolean>(false);
+  const [watchRoomModalTab, setWatchRoomModalTab] = useState<"join" | "create">("join");
+  const [joinRoomCodeInput, setJoinRoomCodeInput] = useState<string>("");
+  const [isRoomBusy, setIsRoomBusy] = useState<boolean>(false);
+  const [roomError, setRoomError] = useState<string | null>(null);
+  const isSyncingFromRemoteRef = useRef<boolean>(false);
+  const lastSyncedRemoteEpochRef = useRef<number>(0);
+  const activeRoomRef = useRef<WatchRoom | null>(null);
+  activeRoomRef.current = activeWatchRoom;
+
   // Robust multi-level recursive window broadcast to reach nested balancer iframes
   const broadcastToWindowTree = useCallback((payload: any) => {
     const iframe = document.querySelector<HTMLIFrameElement>(".has-cinema-iframe-elem");
@@ -828,7 +864,29 @@ export default function Cinema({
     setTimeout(() => setPlayerVolumeMax(false), 1200);
     setIsPlayingState(true);
     showTvToast("Воспроизведение", "▶", 1200);
-  }, [sendIframePlaybackCommand, setPlayerVolumeMax, showTvToast]);
+
+    // Watch room sync
+    if (activeRoomRef.current && !isSyncingFromRemoteRef.current && isTauri) {
+      invoke("sync_cinema_room", {
+        roomCode: activeRoomRef.current.room_code,
+        userEmail: currentUser?.email || "anonymous@has.local",
+        userName: currentUser?.username || currentUser?.email || "Пользователь",
+        isPlaying: true,
+        currentTimeSeconds: currentPlaybackRef.current.currentTime || 0,
+        season: playingSeasonNumber,
+        episode: playingEpisode?.number || 1,
+      }).catch(() => {});
+    }
+  }, [
+    sendIframePlaybackCommand,
+    setPlayerVolumeMax,
+    showTvToast,
+    isTauri,
+    currentUser?.email,
+    currentUser?.username,
+    playingSeasonNumber,
+    playingEpisode?.number,
+  ]);
 
   const triggerPlayerPause = useCallback(() => {
     if (videoRef.current) {
@@ -838,7 +896,28 @@ export default function Cinema({
     }
     setIsPlayingState(false);
     showTvToast("Пауза", "⏸", 1200);
-  }, [sendIframePlaybackCommand, showTvToast]);
+
+    // Watch room sync
+    if (activeRoomRef.current && !isSyncingFromRemoteRef.current && isTauri) {
+      invoke("sync_cinema_room", {
+        roomCode: activeRoomRef.current.room_code,
+        userEmail: currentUser?.email || "anonymous@has.local",
+        userName: currentUser?.username || currentUser?.email || "Пользователь",
+        isPlaying: false,
+        currentTimeSeconds: currentPlaybackRef.current.currentTime || 0,
+        season: playingSeasonNumber,
+        episode: playingEpisode?.number || 1,
+      }).catch(() => {});
+    }
+  }, [
+    sendIframePlaybackCommand,
+    showTvToast,
+    isTauri,
+    currentUser?.email,
+    currentUser?.username,
+    playingSeasonNumber,
+    playingEpisode?.number,
+  ]);
 
   const triggerPlayerPlayPause = useCallback(() => {
     if (videoRef.current) {
@@ -857,16 +936,45 @@ export default function Cinema({
     }
   }, [isPlayingState, triggerPlayerPlay, triggerPlayerPause, sendIframePlaybackCommand]);
 
+  const seekToPlayerTime = useCallback((targetTime: number) => {
+    const boundedTime = Math.max(0, targetTime);
+    if (videoRef.current) {
+      videoRef.current.currentTime = boundedTime;
+      currentPlaybackRef.current.currentTime = boundedTime;
+    } else {
+      currentPlaybackRef.current.currentTime = boundedTime;
+      for (let i = 0; i < 3; i++) {
+        setTimeout(() => {
+          broadcastToWindowTree({ key: "kodik_player_api", value: { method: "seek", time: boundedTime } });
+          broadcastToWindowTree({ api: "seek", set: boundedTime });
+          broadcastToWindowTree({ api: "seek", time: boundedTime });
+          broadcastToWindowTree({ action: "seek", time: boundedTime });
+          broadcastToWindowTree({ method: "seek", time: boundedTime });
+          broadcastToWindowTree({ method: "seekTo", value: boundedTime });
+          broadcastToWindowTree({ type: "SEEK", data: { time: boundedTime } });
+          broadcastToWindowTree({ type: "PLAYER_SEEK", time: boundedTime });
+          broadcastToWindowTree({ type: "seek", time: boundedTime });
+          broadcastToWindowTree({ action: "seek", time: boundedTime });
+          broadcastToWindowTree({ event: "command", func: "seekTo", args: [boundedTime, true] });
+          broadcastToWindowTree({ method: "setCurrentTime", value: boundedTime });
+          broadcastToWindowTree({ command: "seek", time: boundedTime });
+        }, i * 100);
+      }
+    }
+  }, [broadcastToWindowTree]);
+
   const triggerPlayerSeek = useCallback((secondsDelta: number) => {
+    let targetTime = 0;
     if (videoRef.current) {
       videoRef.current.currentTime = Math.max(
         0,
         Math.min(videoRef.current.duration || 999999, videoRef.current.currentTime + secondsDelta)
       );
       currentPlaybackRef.current.currentTime = videoRef.current.currentTime;
+      targetTime = videoRef.current.currentTime;
     } else {
       const curTime = currentPlaybackRef.current.currentTime || 0;
-      const targetTime = Math.max(0, curTime + secondsDelta);
+      targetTime = Math.max(0, curTime + secondsDelta);
       currentPlaybackRef.current.currentTime = targetTime;
 
       // Отправляем команды перемотки несколько раз для надежности
@@ -908,8 +1016,29 @@ export default function Cinema({
         }, i * 100);
       }
     }
+
+    // Watch room sync
+    if (activeRoomRef.current && !isSyncingFromRemoteRef.current && isTauri) {
+      invoke("sync_cinema_room", {
+        roomCode: activeRoomRef.current.room_code,
+        userEmail: currentUser?.email || "anonymous@has.local",
+        userName: currentUser?.username || currentUser?.email || "Пользователь",
+        currentTimeSeconds: targetTime,
+        season: playingSeasonNumber,
+        episode: playingEpisode?.number || 1,
+      }).catch(() => {});
+    }
+
     showTvToast(secondsDelta > 0 ? `+${secondsDelta} сек` : `${secondsDelta} сек`, secondsDelta > 0 ? "⏩" : "⏪", 1000);
-  }, [broadcastToWindowTree, showTvToast]);
+  }, [
+    broadcastToWindowTree,
+    showTvToast,
+    isTauri,
+    currentUser?.email,
+    currentUser?.username,
+    playingSeasonNumber,
+    playingEpisode?.number,
+  ]);
 
   // Give TV remote control directly to iframe if a user needs to interact with in-player controls
   const triggerIframeDirectFocus = useCallback(() => {
@@ -1963,6 +2092,17 @@ export default function Cinema({
   // Play a specific episode
   const handlePlayEpisode = (seasonNum: number, episode: CinemaEpisode) => {
     startPlayback(selectedMedia, seasonNum, episode);
+    if (activeRoomRef.current && !isSyncingFromRemoteRef.current && isTauri) {
+      invoke("sync_cinema_room", {
+        roomCode: activeRoomRef.current.room_code,
+        userEmail: currentUser?.email || "anonymous@has.local",
+        userName: currentUser?.username || currentUser?.email || "Пользователь",
+        currentTimeSeconds: 0,
+        season: seasonNum,
+        episode: episode.number,
+        isPlaying: true,
+      }).catch(() => {});
+    }
   };
 
   // Play button on Hero Banner
@@ -2133,6 +2273,288 @@ export default function Cinema({
     setRussianDubNotice(null);
     setAnilibriaStreamUrl(null);
   }, [isTauri, isFullscreen, playingEpisode, playingMedia, selectedMedia, playingSeasonNumber, currentUser?.email]);
+
+  // Synchronize local player to remote watch room state
+  const syncPlaybackToRoom = useCallback(async (room: WatchRoom) => {
+    isSyncingFromRemoteRef.current = true;
+    lastSyncedRemoteEpochRef.current = room.updated_at_epoch;
+
+    // 1. Locate media item
+    let media = [
+      ...trendingAll,
+      ...popularMovies,
+      ...popularSeries,
+      ...popularAnime,
+      ...searchResults,
+      ...INITIAL_LIBRARY,
+      selectedMedia,
+    ].find((m) => m && (m.id === room.media_id || (m.tmdb_id && String(m.tmdb_id) === String(room.media_id))));
+
+    if (!media && room.media_id.startsWith("tmdb-")) {
+      const parts = room.media_id.replace("tmdb-", "").split("-");
+      const isTv = parts[0] === "tv";
+      const tmdbId = parts[1];
+      if (tmdbId) {
+        try {
+          const endpoint = isTv ? `/tv/${tmdbId}?language=ru-RU` : `/movie/${tmdbId}?language=ru-RU`;
+          const raw = await queryTmdb(endpoint);
+          if (raw) {
+            media = mapTmdbItem(raw, isTv ? "tv" : "movie");
+          }
+        } catch {}
+      }
+    }
+
+    if (!media) {
+      // Fallback synthetic item from room metadata
+      media = {
+        id: room.media_id,
+        title: room.media_title,
+        media_type: room.media_type as "movie" | "tv",
+        poster_url: room.poster_path || INITIAL_LIBRARY[0].poster_url,
+        backdrop_url: room.poster_path || INITIAL_LIBRARY[0].backdrop_url,
+        release_year: "2024",
+        genre: room.media_type === "tv" ? "Сериал" : "Фильм",
+        rating: 8.5,
+        synopsis: `Совместный просмотр «${room.media_title}» в комнате ${room.room_code}.`,
+        seasons: [],
+      };
+    }
+
+    // 2. Start playback
+    const ep =
+      media.seasons.find((s) => s.season_number === room.season)?.episodes.find((e) => e.number === room.episode) ||
+      {
+        id: `play-${media.id}-s${room.season}-e${room.episode}`,
+        number: room.episode || 1,
+        title: room.media_type === "movie" ? "Полный фильм" : `Серия ${room.episode || 1}`,
+        thumbnail: media.poster_url,
+        duration_minutes: media.duration_minutes || (media.media_type === "movie" ? 120 : 45),
+      };
+
+    startPlayback(media, room.season, ep);
+
+    // 3. Sync time position and playback status
+    setTimeout(() => {
+      if (room.current_time_seconds > 0) {
+        seekToPlayerTime(room.current_time_seconds);
+      }
+      if (room.is_playing) {
+        triggerPlayerPlay();
+      } else {
+        triggerPlayerPause();
+      }
+      setTimeout(() => {
+        isSyncingFromRemoteRef.current = false;
+      }, 2000);
+    }, 1500);
+  }, [
+    trendingAll,
+    popularMovies,
+    popularSeries,
+    popularAnime,
+    searchResults,
+    selectedMedia,
+    queryTmdb,
+    startPlayback,
+    seekToPlayerTime,
+    triggerPlayerPlay,
+    triggerPlayerPause,
+  ]);
+
+  const handleOpenWatchRoomForMedia = (media: CinemaMediaItem) => {
+    setSelectedMedia(media);
+    setWatchRoomModalTab("create");
+    setShowWatchRoomModal(true);
+    playTvSelectBeep();
+  };
+
+  const handleCreateRoom = async (mediaToUse?: CinemaMediaItem) => {
+    const targetMedia = mediaToUse || playingMedia || detailsMedia || selectedMedia;
+    if (!targetMedia) {
+      setRoomError("Выберите фильм или сериал для совместного просмотра");
+      return;
+    }
+    setIsRoomBusy(true);
+    setRoomError(null);
+    try {
+      const room: WatchRoom = await invoke("create_cinema_room", {
+        userEmail: currentUser?.email || "anonymous@has.local",
+        userName: currentUser?.username || currentUser?.email || "Пользователь",
+        mediaId: targetMedia.id,
+        mediaTitle: targetMedia.title,
+        mediaType: targetMedia.media_type,
+        posterPath: targetMedia.poster_url || targetMedia.backdrop_url || null,
+        season: playingSeasonNumber || 1,
+        episode: playingEpisode?.number || 1,
+        currentTimeSeconds: currentPlaybackRef.current.currentTime || 0,
+        isPlaying: isPlayingState,
+      });
+
+      setActiveWatchRoom(room);
+      showTvToast(`Комната создана! Код: ${room.room_code}`, "🍿", 4000);
+
+      // If not currently playing, start playback of target media
+      if (!playingEpisode) {
+        startPlayback(targetMedia, room.season);
+      }
+    } catch (err: any) {
+      setRoomError(err?.toString() || "Не удалось создать комнату");
+    } finally {
+      setIsRoomBusy(false);
+    }
+  };
+
+  const handleJoinRoom = async (codeToJoin?: string) => {
+    const code = (codeToJoin || joinRoomCodeInput).trim();
+    if (!code) {
+      setRoomError("Введите 6-значный код комнаты");
+      return;
+    }
+    setIsRoomBusy(true);
+    setRoomError(null);
+    try {
+      const room: WatchRoom = await invoke("join_cinema_room", {
+        roomCode: code,
+        userEmail: currentUser?.email || "anonymous@has.local",
+        userName: currentUser?.username || currentUser?.email || "Пользователь",
+      });
+
+      setActiveWatchRoom(room);
+      setJoinRoomCodeInput("");
+      showTvToast(`Вы вошли в комнату ${room.room_code}!`, "🍿", 3000);
+
+      // Sync player to room media and position
+      await syncPlaybackToRoom(room);
+    } catch (err: any) {
+      setRoomError(err?.toString() || "Комната не найдена или ошибка сети");
+    } finally {
+      setIsRoomBusy(false);
+    }
+  };
+
+  const handleLeaveWatchRoom = async () => {
+    if (!activeWatchRoom) return;
+    try {
+      await invoke("leave_cinema_room", {
+        roomCode: activeWatchRoom.room_code,
+        userEmail: currentUser?.email || "anonymous@has.local",
+      });
+    } catch {}
+    setActiveWatchRoom(null);
+    showTvToast("Вы вышли из комнаты совместного просмотра", "🚪", 2000);
+  };
+
+  // Polling loop for active Watch Together room
+  useEffect(() => {
+    if (!activeWatchRoom) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const room: WatchRoom | null = await invoke("get_cinema_room", {
+          roomCode: activeWatchRoom.room_code,
+          userEmail: currentUser?.email || "anonymous@has.local",
+        });
+
+        if (!room) {
+          setActiveWatchRoom(null);
+          showTvToast("Комната закрыта", "ℹ️", 3000);
+          return;
+        }
+
+        setActiveWatchRoom(room);
+
+        // Check for remote sync events
+        const isRemoteNewer = room.updated_at_epoch > (lastSyncedRemoteEpochRef.current || 0);
+        const myName = currentUser?.username || currentUser?.email || "Я";
+        const isByOther = room.updated_by !== myName && room.updated_by !== (currentUser?.email || "");
+
+        if (isRemoteNewer && isByOther) {
+          lastSyncedRemoteEpochRef.current = room.updated_at_epoch;
+          isSyncingFromRemoteRef.current = true;
+
+          // 1. Episode / Season check
+          if (
+            playingMedia &&
+            (playingSeasonNumber !== room.season || playingEpisode?.number !== room.episode)
+          ) {
+            showTvToast(`${room.updated_by} переключил на сезон ${room.season}, серию ${room.episode}`, "📺", 3000);
+            const ep = playingMedia.seasons
+              .find((s) => s.season_number === room.season)
+              ?.episodes.find((e) => e.number === room.episode);
+            startPlayback(playingMedia, room.season, ep);
+          }
+
+          // 2. Play / Pause check
+          if (room.is_playing !== isPlayingState) {
+            if (room.is_playing) {
+              triggerPlayerPlay();
+              showTvToast(`${room.updated_by} запустил воспроизведение`, "▶", 2000);
+            } else {
+              triggerPlayerPause();
+              showTvToast(`${room.updated_by} поставил на паузу`, "⏸", 2000);
+            }
+          }
+
+          // 3. Seek / Time drift check (> 3.5 seconds)
+          const localTime = currentPlaybackRef.current.currentTime || 0;
+          const drift = Math.abs(localTime - room.current_time_seconds);
+          if (drift > 3.5) {
+            seekToPlayerTime(room.current_time_seconds);
+            const mins = Math.floor(room.current_time_seconds / 60);
+            const secs = Math.floor(room.current_time_seconds % 60);
+            const formatted = `${mins}:${secs < 10 ? "0" : ""}${secs}`;
+            showTvToast(`${room.updated_by} перемотал на ${formatted}`, "⏩", 2500);
+          }
+
+          setTimeout(() => {
+            isSyncingFromRemoteRef.current = false;
+          }, 1500);
+        }
+      } catch (err) {
+        console.warn("Room polling error:", err);
+      }
+    }, 1800);
+
+    return () => clearInterval(interval);
+  }, [
+    activeWatchRoom?.room_code,
+    currentUser?.email,
+    currentUser?.username,
+    isPlayingState,
+    playingEpisode?.number,
+    playingMedia,
+    playingSeasonNumber,
+    seekToPlayerTime,
+    showTvToast,
+    startPlayback,
+    triggerPlayerPause,
+    triggerPlayerPlay,
+  ]);
+
+  // Host periodic playback alignment (every 6 seconds)
+  useEffect(() => {
+    if (!activeWatchRoom || !playingEpisode || !isPlayingState) return;
+
+    const isHost = activeWatchRoom.host_email === (currentUser?.email || "");
+    if (!isHost) return;
+
+    const interval = setInterval(() => {
+      if (isSyncingFromRemoteRef.current) return;
+      const curTime = currentPlaybackRef.current.currentTime || 0;
+      invoke("sync_cinema_room", {
+        roomCode: activeWatchRoom.room_code,
+        userEmail: currentUser?.email || "anonymous@has.local",
+        userName: currentUser?.username || currentUser?.email || "Пользователь",
+        currentTimeSeconds: curTime,
+        isPlaying: isPlayingState,
+        season: playingSeasonNumber,
+        episode: playingEpisode.number,
+      }).catch(() => {});
+    }, 6000);
+
+    return () => clearInterval(interval);
+  }, [activeWatchRoom, playingEpisode, isPlayingState, currentUser?.email, currentUser?.username, playingSeasonNumber]);
 
   // Synchronize playback progress across devices even for embedded players (iframes)
   useEffect(() => {
@@ -3539,6 +3961,18 @@ export default function Cinema({
             >
               🔍 Поиск
             </button>
+            <button
+              type="button"
+              className={`has-cinema-tv-tab-btn ${activeWatchRoom ? "active" : ""}`}
+              onClick={() => {
+                setShowWatchRoomModal(true);
+                playTvSelectBeep();
+              }}
+              data-tv-focusable="true"
+              title="Совместный просмотр"
+            >
+              🍿 {activeWatchRoom ? `Комната (${activeWatchRoom.participants.length})` : "Совместно"}
+            </button>
           </nav>
         </header>
       )}
@@ -3647,6 +4081,24 @@ export default function Cinema({
               )}
             </div>
           </div>
+
+          {/* Watch Together (Совместный просмотр) Header Button */}
+          <button
+            type="button"
+            className={`has-cinema-watch-together-btn ${activeWatchRoom ? "active" : ""}`}
+            onClick={() => {
+              setShowWatchRoomModal(true);
+              playTvSelectBeep();
+            }}
+            data-tv-focusable="true"
+            title="Совместный просмотр с друзьями"
+          >
+            <span className="room-icon">🍿</span>
+            <span className="room-label">
+              {activeWatchRoom ? `Комната ${activeWatchRoom.room_code} (${activeWatchRoom.participants.length})` : "Совместно"}
+            </span>
+            {activeWatchRoom && <span className="room-live-dot" />}
+          </button>
 
           {/* User profile avatar */}
           <div className="has-cinema-user-avatar" title={currentUser.email}>
@@ -3843,6 +4295,16 @@ export default function Cinema({
                     <line x1="12" y1="8" x2="12.01" y2="8" />
                   </svg>
                   <span>О фильме</span>
+                </button>
+
+                <button
+                  type="button"
+                  className="has-cinema-btn-together"
+                  onClick={() => handleOpenWatchRoomForMedia(selectedMedia)}
+                  title="Совместный просмотр с друзьями"
+                  data-tv-focusable="true"
+                >
+                  🍿 Совместно
                 </button>
 
                 <button
@@ -4593,6 +5055,18 @@ export default function Cinema({
                       </button>
                     )}
 
+                    <button
+                      type="button"
+                      className="has-cinema-details-btn-room"
+                      onClick={() => {
+                        handleOpenWatchRoomForMedia(detailsMedia);
+                      }}
+                      data-tv-focusable="true"
+                      title="Создать комнату совместного просмотра"
+                    >
+                      🍿 Совместно
+                    </button>
+
                     {isLoadingDetails && (
                       <span className="has-cinema-details-loading-badge">Загрузка данных...</span>
                     )}
@@ -4829,6 +5303,41 @@ export default function Cinema({
             </div>
 
             <div className="has-cinema-player-hud-right">
+              {/* Watch Together HUD Badge / Button */}
+              {activeWatchRoom ? (
+                <div className="has-cinema-player-hud-room-badge" title="Синхронный просмотр">
+                  <span className="room-badge-live">●</span>
+                  <span className="room-badge-code">Комната: {activeWatchRoom.room_code}</span>
+                  <span className="room-badge-count">👥 {activeWatchRoom.participants.length}</span>
+                  <button
+                    type="button"
+                    className="has-cinema-player-hud-room-leave-btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleLeaveWatchRoom();
+                    }}
+                    title="Выйти из комнаты совместного просмотра"
+                    data-tv-focusable="true"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  className="has-cinema-player-hud-btn"
+                  onClick={() => {
+                    setShowWatchRoomModal(true);
+                    resetHudTimer();
+                  }}
+                  title="Пригласить друга для совместного просмотра"
+                  data-tv-focusable="true"
+                  data-tv-row="top"
+                >
+                  🍿 Совместно
+                </button>
+              )}
+
               {/* Single Gear Button: Contains ALL player functions */}
               <button
                 type="button"
@@ -5521,6 +6030,228 @@ export default function Cinema({
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* ========================================================
+          WATCH TOGETHER (СОBMECТНЫЙ ПРОСМОТР) MODAL
+          ======================================================== */}
+      {showWatchRoomModal && (
+        <div
+          className="has-cinema-watch-room-overlay"
+          onClick={() => setShowWatchRoomModal(false)}
+        >
+          <div
+            className="has-cinema-watch-room-modal"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="has-cinema-watch-room-header">
+              <div className="has-cinema-watch-room-title-box">
+                <span className="room-icon-lg">🍿</span>
+                <div>
+                  <h3 className="has-cinema-watch-room-title">Совместный просмотр</h3>
+                  <p className="has-cinema-watch-room-sub">
+                    Смотрите фильмы и сериалы синхронно с друзьями
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="has-cinema-watch-room-close"
+                onClick={() => setShowWatchRoomModal(false)}
+                data-tv-focusable="true"
+              >
+                ✕
+              </button>
+            </div>
+
+            {roomError && (
+              <div className="has-cinema-watch-room-alert error">
+                ⚠️ {roomError}
+              </div>
+            )}
+
+            {activeWatchRoom ? (
+              /* Already Connected Room View */
+              <div className="has-cinema-watch-room-connected">
+                <div className="has-cinema-watch-room-code-card">
+                  <span className="code-label">КОД ВАШЕЙ КОМНАТЫ:</span>
+                  <div className="code-display">
+                    {activeWatchRoom.room_code.split("").map((digit, idx) => (
+                      <span key={idx} className="code-digit">{digit}</span>
+                    ))}
+                  </div>
+                  <div className="code-actions">
+                    <button
+                      type="button"
+                      className="has-cinema-watch-room-btn-copy"
+                      onClick={() => {
+                        navigator.clipboard?.writeText(activeWatchRoom.room_code);
+                        showTvToast("Код комнаты скопирован в буфер обмена!", "📋", 2000);
+                      }}
+                      data-tv-focusable="true"
+                    >
+                      📋 Скопировать код
+                    </button>
+                  </div>
+                  <p className="code-hint">
+                    Отправьте этот 6-значный код другу. Когда он введет его в приложении, вы будете смотреть тайтл одновременно!
+                  </p>
+                </div>
+
+                <div className="has-cinema-watch-room-media-info">
+                  <div className="media-info-row">
+                    <span className="label">Тайтл:</span>
+                    <strong className="value">{activeWatchRoom.media_title}</strong>
+                  </div>
+                  {activeWatchRoom.media_type !== "movie" && (
+                    <div className="media-info-row">
+                      <span className="label">Серия:</span>
+                      <strong className="value">Сезон {activeWatchRoom.season}, Серия {activeWatchRoom.episode}</strong>
+                    </div>
+                  )}
+                  <div className="media-info-row">
+                    <span className="label">Статус:</span>
+                    <strong className="value status-highlight">
+                      {activeWatchRoom.is_playing ? "▶ Идет воспроизведение" : "⏸ На паузе"}
+                    </strong>
+                  </div>
+                </div>
+
+                <div className="has-cinema-watch-room-participants">
+                  <h4 className="participants-title">
+                    Участники в комнате ({activeWatchRoom.participants.length}):
+                  </h4>
+                  <div className="participants-list">
+                    {activeWatchRoom.participants.map((p, idx) => (
+                      <div key={idx} className="participant-chip">
+                        <span className="online-indicator" />
+                        <span className="participant-name">{p.user_name || p.user_email}</span>
+                        {p.is_host && <span className="host-tag">Создатель</span>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="has-cinema-watch-room-footer-actions">
+                  {!playingEpisode && (
+                    <button
+                      type="button"
+                      className="has-cinema-watch-room-btn-primary"
+                      onClick={() => {
+                        setShowWatchRoomModal(false);
+                        syncPlaybackToRoom(activeWatchRoom);
+                      }}
+                      data-tv-focusable="true"
+                    >
+                      🎬 Перейти к фильму
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="has-cinema-watch-room-btn-danger"
+                    onClick={async () => {
+                      await handleLeaveWatchRoom();
+                      setShowWatchRoomModal(false);
+                    }}
+                    data-tv-focusable="true"
+                  >
+                    🚪 Выйти из комнаты
+                  </button>
+                </div>
+              </div>
+            ) : (
+              /* Create or Join Room Tabs */
+              <div className="has-cinema-watch-room-tabs-container">
+                <div className="has-cinema-watch-room-nav-tabs">
+                  <button
+                    type="button"
+                    className={`tab-btn ${watchRoomModalTab === "join" ? "active" : ""}`}
+                    onClick={() => {
+                      setWatchRoomModalTab("join");
+                      setRoomError(null);
+                    }}
+                    data-tv-focusable="true"
+                  >
+                    🔑 Войти по коду
+                  </button>
+                  <button
+                    type="button"
+                    className={`tab-btn ${watchRoomModalTab === "create" ? "active" : ""}`}
+                    onClick={() => {
+                      setWatchRoomModalTab("create");
+                      setRoomError(null);
+                    }}
+                    data-tv-focusable="true"
+                  >
+                    ✨ Создать комнату
+                  </button>
+                </div>
+
+                {watchRoomModalTab === "join" ? (
+                  <div className="has-cinema-watch-room-tab-content">
+                    <p className="tab-description">
+                      Введите 6-значный код комнаты, полученный от вашего друга:
+                    </p>
+                    <div className="room-code-input-wrapper">
+                      <input
+                        type="text"
+                        maxLength={6}
+                        placeholder="000000"
+                        value={joinRoomCodeInput}
+                        onChange={(e) => setJoinRoomCodeInput(e.target.value.replace(/[^0-9a-zA-Z]/g, "").slice(0, 6))}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            handleJoinRoom();
+                          }
+                        }}
+                        className="room-code-input"
+                        data-tv-focusable="true"
+                        autoFocus
+                      />
+                    </div>
+                    <div className="tab-actions">
+                      <button
+                        type="button"
+                        className="has-cinema-watch-room-btn-primary"
+                        disabled={joinRoomCodeInput.trim().length < 6 || isRoomBusy}
+                        onClick={() => handleJoinRoom()}
+                        data-tv-focusable="true"
+                      >
+                        {isRoomBusy ? "Подключение..." : "🚀 Войти в комнату"}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="has-cinema-watch-room-tab-content">
+                    <p className="tab-description">
+                      Создайте новую комнату для совместного просмотра. Время, воспроизведение, пауза и серии синхронизируются мгновенно!
+                    </p>
+                    <div className="create-room-target-card">
+                      <span className="card-label">Будет запущен тайтл:</span>
+                      <strong className="card-title">
+                        {(playingMedia || detailsMedia || selectedMedia)?.title || "Фильм не выбран"}
+                      </strong>
+                      <span className="card-type">
+                        {(playingMedia || detailsMedia || selectedMedia)?.media_type === "tv" ? "📺 Сериал" : "🎬 Фильм"}
+                      </span>
+                    </div>
+                    <div className="tab-actions">
+                      <button
+                        type="button"
+                        className="has-cinema-watch-room-btn-primary"
+                        disabled={isRoomBusy}
+                        onClick={() => handleCreateRoom()}
+                        data-tv-focusable="true"
+                      >
+                        {isRoomBusy ? "Создание..." : "🍿 Создать комнату и получить код"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
