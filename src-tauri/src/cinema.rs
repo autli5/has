@@ -673,93 +673,37 @@ fn generate_room_code() -> String {
     format!("{:06}", (hasher % 900_000) + 100_000)
 }
 
-async fn ensure_cinema_rooms_table(client: &tokio_postgres::Client) {
-    let ddl = r#"
-        CREATE TABLE IF NOT EXISTS cinema_rooms (
-            room_code VARCHAR(16) PRIMARY KEY,
-            host_email VARCHAR(255) NOT NULL,
-            host_name VARCHAR(255) NOT NULL,
-            media_id VARCHAR(255) NOT NULL,
-            media_title TEXT NOT NULL,
-            media_type VARCHAR(32) NOT NULL DEFAULT 'movie',
-            poster_path TEXT,
-            season INT NOT NULL DEFAULT 1,
-            episode INT NOT NULL DEFAULT 1,
-            current_time_seconds DOUBLE PRECISION NOT NULL DEFAULT 0,
-            is_playing BOOLEAN NOT NULL DEFAULT false,
-            updated_by VARCHAR(255) NOT NULL,
-            updated_at_epoch BIGINT NOT NULL,
-            participants_json TEXT NOT NULL DEFAULT '[]',
-            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-            last_active TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
-        );
-    "#;
-    let _ = client.batch_execute(ddl).await;
-}
-
 pub async fn db_save_room(room: &WatchRoom) -> Result<(), String> {
     let config = crate::auth::get_db_config();
     let client = crate::auth::connect_to_db(&config)
         .await
         .map_err(|e| format!("Ошибка подключения к БД комнат: {}", e))?;
 
-    ensure_cinema_rooms_table(&client).await;
+    let title = format!("__cinema_room_{}__", room.room_code);
+    let room_json = serde_json::to_string(room).map_err(|e| format!("Ошибка сериализации данных: {}", e))?;
 
-    let participants_json = serde_json::to_string(&room.participants).unwrap_or_else(|_| "[]".to_string());
-    let season_i32 = room.season as i32;
-    let episode_i32 = room.episode as i32;
+    let existing = client
+        .query_opt("SELECT id FROM server_notes WHERE title = $1 LIMIT 1", &[&title])
+        .await
+        .map_err(|e| format!("Ошибка чтения БД: {}", e))?;
 
-    let res = client.execute(
-        r#"
-        INSERT INTO cinema_rooms (
-            room_code, host_email, host_name, media_id, media_title, media_type,
-            poster_path, season, episode, current_time_seconds, is_playing,
-            updated_by, updated_at_epoch, participants_json, last_active
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, CURRENT_TIMESTAMP)
-        ON CONFLICT (room_code) DO UPDATE SET
-            media_id = EXCLUDED.media_id,
-            media_title = EXCLUDED.media_title,
-            media_type = EXCLUDED.media_type,
-            poster_path = EXCLUDED.poster_path,
-            season = EXCLUDED.season,
-            episode = EXCLUDED.episode,
-            current_time_seconds = EXCLUDED.current_time_seconds,
-            is_playing = EXCLUDED.is_playing,
-            updated_by = EXCLUDED.updated_by,
-            updated_at_epoch = EXCLUDED.updated_at_epoch,
-            participants_json = EXCLUDED.participants_json,
-            last_active = CURRENT_TIMESTAMP;
-        "#,
-        &[
-            &room.room_code,
-            &room.host_email,
-            &room.host_name,
-            &room.media_id,
-            &room.media_title,
-            &room.media_type,
-            &room.poster_path,
-            &season_i32,
-            &episode_i32,
-            &room.current_time_seconds,
-            &room.is_playing,
-            &room.updated_by,
-            &room.updated_at_epoch,
-            &participants_json,
-        ],
-    ).await;
-
-    if res.is_err() {
-        // Fallback into server_notes table
-        let title = format!("__cinema_room_{}__", room.room_code);
-        let room_json = serde_json::to_string(room).map_err(|e| e.to_string())?;
-        let _ = client.execute(
-            "DELETE FROM server_notes WHERE title = $1;",
-            &[&title],
-        ).await;
-        client.execute(
-            "INSERT INTO server_notes (user_email, title, content) VALUES ($1, $2, $3);",
-            &[&room.host_email, &title, &room_json],
-        ).await.map_err(|e| format!("Не удалось сохранить комнату: {}", e))?;
+    if let Some(row) = existing {
+        let id: i64 = row.get(0);
+        client
+            .execute(
+                "UPDATE server_notes SET content = $1, user_email = $2 WHERE id = $3",
+                &[&room_json, &room.host_email, &id],
+            )
+            .await
+            .map_err(|e| format!("Ошибка обновления комнаты: {}", e))?;
+    } else {
+        client
+            .execute(
+                "INSERT INTO server_notes (user_email, title, folder, content, note_type, status) VALUES ($1, $2, 'cinema_rooms', $3, 'system', 'active')",
+                &[&room.host_email, &title, &room_json],
+            )
+            .await
+            .map_err(|e| format!("Ошибка создания записи комнаты: {}", e))?;
     }
 
     Ok(())
@@ -776,60 +720,16 @@ pub async fn db_get_room(room_code: &str) -> Result<Option<WatchRoom>, String> {
         .await
         .map_err(|e| format!("Ошибка подключения к БД: {}", e))?;
 
-    ensure_cinema_rooms_table(&client).await;
-
-    let row_res = client.query_opt(
-        r#"
-        SELECT room_code, host_email, host_name, media_id, media_title, media_type,
-               poster_path, season, episode, current_time_seconds, is_playing,
-               updated_by, updated_at_epoch, participants_json
-        FROM cinema_rooms
-        WHERE room_code = $1;
-        "#,
-        &[&clean_code],
-    ).await;
-
-    if let Ok(Some(row)) = row_res {
-        let r_code: String = row.get(0);
-        let host_email: String = row.get(1);
-        let host_name: String = row.get(2);
-        let media_id: String = row.get(3);
-        let media_title: String = row.get(4);
-        let media_type: String = row.get(5);
-        let poster_path: Option<String> = row.get(6);
-        let season: i32 = row.get(7);
-        let episode: i32 = row.get(8);
-        let current_time_seconds: f64 = row.get(9);
-        let is_playing: bool = row.get(10);
-        let updated_by: String = row.get(11);
-        let updated_at_epoch: i64 = row.get(12);
-        let participants_raw: String = row.get(13);
-        let participants: Vec<RoomParticipant> = serde_json::from_str(&participants_raw).unwrap_or_default();
-
-        return Ok(Some(WatchRoom {
-            room_code: r_code,
-            host_email,
-            host_name,
-            media_id,
-            media_title,
-            media_type,
-            poster_path,
-            season: season.max(1) as u32,
-            episode: episode.max(1) as u32,
-            current_time_seconds,
-            is_playing,
-            updated_by,
-            updated_at_epoch,
-            participants,
-        }));
-    }
-
-    // Fallback: check server_notes
     let title = format!("__cinema_room_{}__", clean_code);
-    if let Ok(Some(row)) = client.query_opt(
-        "SELECT content FROM server_notes WHERE title = $1 ORDER BY id DESC LIMIT 1;",
-        &[&title],
-    ).await {
+    let row = client
+        .query_opt(
+            "SELECT content FROM server_notes WHERE title = $1 ORDER BY id DESC LIMIT 1",
+            &[&title],
+        )
+        .await
+        .map_err(|e| format!("Ошибка запроса комнаты: {}", e))?;
+
+    if let Some(row) = row {
         let content: String = row.get(0);
         if let Ok(room) = serde_json::from_str::<WatchRoom>(&content) {
             return Ok(Some(room));
@@ -1028,7 +928,6 @@ pub async fn leave_cinema_room(
         // Room is empty - clean up
         let config = crate::auth::get_db_config();
         if let Ok(client) = crate::auth::connect_to_db(&config).await {
-            let _ = client.execute("DELETE FROM cinema_rooms WHERE room_code = $1;", &[&clean_code]).await;
             let title = format!("__cinema_room_{}__", clean_code);
             let _ = client.execute("DELETE FROM server_notes WHERE title = $1;", &[&title]).await;
         }
@@ -1140,6 +1039,51 @@ mod tests {
         let config = crate::auth::get_db_config();
         if let Ok(client) = crate::auth::connect_to_db(&config).await {
             let _ = client.execute("DELETE FROM server_notes WHERE LOWER(user_email) = LOWER($1) AND title = '__cinema_state__'", &[&test_email]).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn test_cinema_room_db() {
+        crate::auth::load_env();
+        let test_room = WatchRoom {
+            room_code: "999888".to_string(),
+            host_email: "test_host@example.com".to_string(),
+            host_name: "Test Host".to_string(),
+            media_id: "tmdb-movie-157336".to_string(),
+            media_title: "Интерстеллар".to_string(),
+            media_type: "movie".to_string(),
+            poster_path: None,
+            season: 1,
+            episode: 1,
+            current_time_seconds: 120.0,
+            is_playing: true,
+            updated_by: "Test Host".to_string(),
+            updated_at_epoch: get_now_epoch_ms(),
+            participants: vec![RoomParticipant {
+                user_email: "test_host@example.com".to_string(),
+                user_name: "Test Host".to_string(),
+                is_host: true,
+                last_seen_epoch: get_now_epoch_ms(),
+            }],
+        };
+
+        let res = db_save_room(&test_room).await;
+        println!("test_cinema_room_db db_save_room res: {:?}", res);
+        assert!(res.is_ok(), "Failed to save room: {:?}", res);
+
+        let fetched = db_get_room("999888").await;
+        println!("test_cinema_room_db db_get_room res: {:?}", fetched);
+        assert!(fetched.is_ok());
+        let room_opt = fetched.unwrap();
+        assert!(room_opt.is_some());
+        let r = room_opt.unwrap();
+        assert_eq!(r.room_code, "999888");
+        assert_eq!(r.media_title, "Интерстеллар");
+
+        // Clean up test room
+        let config = crate::auth::get_db_config();
+        if let Ok(client) = crate::auth::connect_to_db(&config).await {
+            let _ = client.execute("DELETE FROM server_notes WHERE title = '__cinema_room_999888__'", &[]).await;
         }
     }
 
