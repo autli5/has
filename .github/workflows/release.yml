@@ -20,14 +20,22 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: 'macos-latest'
+          - platform: 'macos-13'
+            target: 'x86_64-apple-darwin'
+            continue-on-error: false
+          - platform: 'macos-15'
             target: 'aarch64-apple-darwin'
+            continue-on-error: true
           - platform: 'windows-latest'
             target: 'x86_64-pc-windows-msvc'
+            continue-on-error: false
           - platform: 'ubuntu-22.04'
             target: 'x86_64-unknown-linux-gnu'
+            continue-on-error: false
 
     runs-on: ${{ matrix.platform }}
+    continue-on-error: ${{ matrix.continue-on-error || false }}
+    timeout-minutes: 45
 
     steps:
       - name: Checkout repository
@@ -77,6 +85,7 @@ jobs:
     permissions:
       contents: write
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
