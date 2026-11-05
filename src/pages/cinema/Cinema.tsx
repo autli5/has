@@ -299,6 +299,16 @@ export default function Cinema({
   const activeRoomRef = useRef<WatchRoom | null>(null);
   activeRoomRef.current = activeWatchRoom;
 
+  // Single-run autoplay and pause lock control
+  const hasAutoplayedRef = useRef<boolean>(false);
+  const isPausedByUserRef = useRef<boolean>(false);
+  const autoplayTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+
+  const clearAutoplayTimers = useCallback(() => {
+    autoplayTimersRef.current.forEach((t) => clearTimeout(t));
+    autoplayTimersRef.current = [];
+  }, []);
+
   // Robust multi-level recursive window broadcast to reach nested balancer iframes
   const broadcastToWindowTree = useCallback((payload: any) => {
     const iframe = document.querySelector<HTMLIFrameElement>(".has-cinema-iframe-elem");
@@ -442,6 +452,9 @@ export default function Cinema({
   }, [broadcastToWindowTree, showTvToast]);
 
   const triggerPlayerPlay = useCallback(() => {
+    isPausedByUserRef.current = false;
+    clearAutoplayTimers();
+
     if (videoRef.current) {
       try {
         videoRef.current.muted = false;
@@ -457,10 +470,7 @@ export default function Cinema({
         } catch {}
       }
     }
-    // Установка громкости 100% каждый раз при воспроизведении
     setPlayerVolumeMax(false);
-    setTimeout(() => setPlayerVolumeMax(false), 400);
-    setTimeout(() => setPlayerVolumeMax(false), 1200);
     setIsPlayingState(true);
     showTvToast("Воспроизведение", "▶", 1200);
 
@@ -487,9 +497,13 @@ export default function Cinema({
     currentUser?.username,
     playingSeasonNumber,
     playingEpisode?.number,
+    clearAutoplayTimers,
   ]);
 
   const triggerPlayerPause = useCallback(() => {
+    isPausedByUserRef.current = true;
+    clearAutoplayTimers();
+
     if (videoRef.current) {
       videoRef.current.pause();
     } else {
@@ -520,6 +534,7 @@ export default function Cinema({
     currentUser?.username,
     playingSeasonNumber,
     playingEpisode?.number,
+    clearAutoplayTimers,
   ]);
 
   const triggerPlayerPlayPause = useCallback(() => {
@@ -535,9 +550,8 @@ export default function Cinema({
       } else {
         triggerPlayerPlay();
       }
-      sendIframePlaybackCommand("toggle");
     }
-  }, [isPlayingState, triggerPlayerPlay, triggerPlayerPause, sendIframePlaybackCommand]);
+  }, [isPlayingState, triggerPlayerPlay, triggerPlayerPause]);
 
   const seekToPlayerTime = useCallback((targetTime: number) => {
     const boundedTime = Math.max(0, targetTime);
@@ -1426,6 +1440,9 @@ export default function Cinema({
 
     if (nextUntried) {
       console.log(`[Cinema Failover] ${reason}. Auto-switching to:`, nextUntried);
+      hasAutoplayedRef.current = false;
+      isPausedByUserRef.current = false;
+      clearAutoplayTimers();
       setSelectedMirror(nextUntried);
       setIsMirrorConnecting(true);
       setAllMirrorsFailed(false);
@@ -1461,27 +1478,29 @@ export default function Cinema({
       mirrorWatchdogTimerRef.current = null;
     }
     setIsMirrorConnecting(false);
-    // Auto-trigger play and max volume once iframe scripts initialize
-    setTimeout(() => {
-      sendIframePlaybackCommand("play");
-      setPlayerVolumeMax(false);
-    }, 500);
-    setTimeout(() => {
-      sendIframePlaybackCommand("play");
-      setPlayerVolumeMax(false);
+
+    // Скрипт автозапуска должен быть активен ТОЛЬКО один раз в самом начале фильма
+    if (hasAutoplayedRef.current) return;
+    hasAutoplayedRef.current = true;
+
+    clearAutoplayTimers();
+
+    const t1 = setTimeout(() => {
+      if (!isPausedByUserRef.current) {
+        sendIframePlaybackCommand("play");
+        setPlayerVolumeMax(false);
+      }
+    }, 600);
+
+    const t2 = setTimeout(() => {
+      if (!isPausedByUserRef.current) {
+        sendIframePlaybackCommand("play");
+        setPlayerVolumeMax(false);
+      }
     }, 1500);
-    setTimeout(() => {
-      setPlayerVolumeMax(false);
-    }, 2800);
-    setTimeout(() => {
-      setPlayerVolumeMax(false);
-    }, 4500);
-    // Агрессивная установка громкости каждые 3 секунды (первые 15 секунд)
-    const volumeInterval = setInterval(() => {
-      setPlayerVolumeMax(false);
-    }, 3000);
-    setTimeout(() => clearInterval(volumeInterval), 15000);
-  }, [sendIframePlaybackCommand, setPlayerVolumeMax]);
+
+    autoplayTimersRef.current = [t1, t2];
+  }, [sendIframePlaybackCommand, setPlayerVolumeMax, clearAutoplayTimers]);
 
   // Start playback for a media item (movie or specific series episode)
   const startPlayback = (media: CinemaMediaItem, seasonNum: number = 1, episode?: CinemaEpisode) => {
@@ -1544,6 +1563,9 @@ export default function Cinema({
     }
 
     // Reset mirror tracking and watchdog for fresh playback session
+    hasAutoplayedRef.current = false;
+    isPausedByUserRef.current = false;
+    clearAutoplayTimers();
     triedMirrorsRef.current.clear();
     setAllMirrorsFailed(false);
     setIsMirrorConnecting(true);
@@ -2264,18 +2286,6 @@ export default function Cinema({
     return () => clearInterval(interval);
   }, [playingEpisode, playerMode, allMirrorsFailed, playingMedia, selectedMedia, playingSeasonNumber, isTauri, currentUser?.email]);
 
-  // Постоянный мониторинг и поддержание громкости на 100% во время воспроизведения
-  useEffect(() => {
-    if (!playingEpisode) return;
-
-    // Устанавливаем громкость каждые 2 секунды во время воспроизведения
-    const volumeKeeper = setInterval(() => {
-      setPlayerVolumeMax(false);
-    }, 2000);
-
-    return () => clearInterval(volumeKeeper);
-  }, [playingEpisode, setPlayerVolumeMax]);
-
   // Listen to postMessage from embedded players (VidLink, Kodik, Alloha)
   useEffect(() => {
     const handleWindowMessage = (e: MessageEvent) => {
@@ -2315,7 +2325,11 @@ export default function Cinema({
           if (typeof data.data.duration === "number" && data.data.duration > 0) {
             currentPlaybackRef.current.duration = data.data.duration;
           }
-          handleIframeLoaded();
+          setIsMirrorConnecting(false);
+          if (mirrorWatchdogTimerRef.current) {
+            clearTimeout(mirrorWatchdogTimerRef.current);
+            mirrorWatchdogTimerRef.current = null;
+          }
         }
 
         // Kodik postMessage
@@ -2326,7 +2340,11 @@ export default function Cinema({
           if (typeof data.value.duration === "number" && data.value.duration > 0) {
             currentPlaybackRef.current.duration = data.value.duration;
           }
-          handleIframeLoaded();
+          setIsMirrorConnecting(false);
+          if (mirrorWatchdogTimerRef.current) {
+            clearTimeout(mirrorWatchdogTimerRef.current);
+            mirrorWatchdogTimerRef.current = null;
+          }
         }
 
         // Generic timeupdate
@@ -2335,14 +2353,18 @@ export default function Cinema({
           if (typeof data.duration === "number") {
             currentPlaybackRef.current.duration = data.duration;
           }
-          handleIframeLoaded();
+          setIsMirrorConnecting(false);
+          if (mirrorWatchdogTimerRef.current) {
+            clearTimeout(mirrorWatchdogTimerRef.current);
+            mirrorWatchdogTimerRef.current = null;
+          }
         }
       } catch {}
     };
 
     window.addEventListener("message", handleWindowMessage);
     return () => window.removeEventListener("message", handleWindowMessage);
-  }, [handleIframeLoaded]);
+  }, []);
 
   // D-Pad Spatial Navigation & TV Remote Key Handler
   const handleRemoteKeyDown = useCallback(
@@ -3102,6 +3124,9 @@ export default function Cinema({
       clearTimeout(mirrorWatchdogTimerRef.current);
       mirrorWatchdogTimerRef.current = null;
     }
+    hasAutoplayedRef.current = false;
+    isPausedByUserRef.current = false;
+    clearAutoplayTimers();
     setSelectedMirror(mirrorId);
     setAllMirrorsFailed(false);
     setIsMirrorConnecting(true);

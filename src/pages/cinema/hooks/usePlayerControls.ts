@@ -2,6 +2,7 @@ import { useCallback } from "react";
 
 interface UsePlayerControlsOptions {
   videoRef: React.RefObject<HTMLVideoElement>;
+  isPlayingState?: boolean;
   setIsPlayingState: (playing: boolean) => void;
   showTvToast: (message: string, icon: string, duration: number) => void;
   sendIframePlaybackCommand: (command: string) => void;
@@ -11,6 +12,7 @@ interface UsePlayerControlsOptions {
 
 export const usePlayerControls = ({
   videoRef,
+  isPlayingState = true,
   setIsPlayingState,
   showTvToast,
   sendIframePlaybackCommand,
@@ -49,9 +51,13 @@ export const usePlayerControls = ({
         triggerPlayerPause();
       }
     } else {
-      sendIframePlaybackCommand("toggle");
+      if (isPlayingState) {
+        triggerPlayerPause();
+      } else {
+        triggerPlayerPlay();
+      }
     }
-  }, [videoRef, triggerPlayerPlay, triggerPlayerPause, sendIframePlaybackCommand]);
+  }, [videoRef, isPlayingState, triggerPlayerPlay, triggerPlayerPause]);
 
   const seekToPlayerTime = useCallback((targetTime: number) => {
     const boundedTime = Math.max(0, targetTime);
