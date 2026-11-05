@@ -18,6 +18,16 @@ import type {
   CinemaPlayback,
   UserDto,
 } from "../../types";
+import { INITIAL_LIBRARY } from "./constants/library";
+import {
+  formatCurrency,
+  formatRuntime,
+  getMediaCategoryLabel,
+  getMediaBadgeLabel,
+  formatMediaImg,
+  detectTvEnvironment,
+} from "./utils/formatters";
+import type { BalancerMirror, RawTmdbItem, WatchRoom } from "./types";
 import "./Cinema.css";
 
 interface CinemaProps {
@@ -27,329 +37,6 @@ interface CinemaProps {
   isTvEnvironment?: boolean;
 }
 
-const buildAnimeSeasons = (seasonConfigs: { season_number: number; count: number }[], thumb: string): CinemaSeason[] => {
-  return seasonConfigs.map((cfg) => ({
-    season_number: cfg.season_number,
-    episodes: Array.from({ length: cfg.count }, (_, i) => ({
-      id: `demonic-s${cfg.season_number}-e${i + 1}`,
-      number: i + 1,
-      title: `Серия ${i + 1}`,
-      thumbnail: thumb,
-      duration_minutes: 24,
-    })),
-  }));
-};
-
-const formatCurrency = (amount?: number): string | null => {
-  if (!amount || amount <= 0) return null;
-  if (amount >= 1_000_000_000) {
-    return `$${(amount / 1_000_000_000).toFixed(2)} млрд ($${amount.toLocaleString("ru-RU")})`;
-  }
-  if (amount >= 1_000_000) {
-    return `$${(amount / 1_000_000).toFixed(1)} млн ($${amount.toLocaleString("ru-RU")})`;
-  }
-  return `$${amount.toLocaleString("ru-RU")}`;
-};
-
-const formatRuntime = (minutes?: number): string | null => {
-  if (!minutes || minutes <= 0) return null;
-  const hours = Math.floor(minutes / 60);
-  const mins = minutes % 60;
-  if (hours > 0 && mins > 0) return `${hours} ч ${mins} мин`;
-  if (hours > 0) return `${hours} ч`;
-  return `${mins} мин`;
-};
-
-// Accurate media category label (never confuses live-action series with anime)
-const getMediaCategoryLabel = (media: CinemaMediaItem | null | undefined): string => {
-  if (!media) return "Сериал";
-  const g = (media.genre || "").toLowerCase();
-  const isAnime = g.includes("аниме") || g.includes("anime");
-  const isCartoon = g.includes("мультфильм") || g.includes("анимация") || g.includes("animation");
-
-  if (media.media_type === "movie") {
-    if (isAnime) return "Аниме-фильм";
-    if (isCartoon) return "Мультфильм";
-    return "Фильм";
-  }
-
-  // TV / Series
-  if (isAnime) return "Аниме-сериал";
-  if (isCartoon) return "Мультсериал";
-  return "Сериал";
-};
-
-const getMediaBadgeLabel = (media: CinemaMediaItem | null | undefined): string => {
-  return getMediaCategoryLabel(media).toUpperCase();
-};
-
-// Initial Curated Fallback Library
-const INITIAL_LIBRARY: CinemaMediaItem[] = [
-  {
-    id: "demonic-slash",
-    tmdb_id: 85937,
-    media_type: "tv",
-    title: "Клинок, рассекающий демонов",
-    original_title: "Kimetsu no Yaiba",
-    backdrop_url: "https://images.unsplash.com/photo-1578632767115-351597cf2477?q=80&w=1600&auto=format&fit=crop",
-    poster_url: "https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?q=80&w=600&auto=format&fit=crop",
-    release_year: 2024,
-    seasons_count: 4,
-    genre: "Аниме / Сёнэн",
-    rating: 4.9,
-    tagline: "Разруби свою судьбу клинком",
-    countries: "Япония",
-    director: "Харуо Сотодзаки",
-    cast: [
-      { id: 21, name: "Нацуки Ханаэ", character: "Танджиро Камадо" },
-      { id: 22, name: "Акари Кито", character: "Незуко Камадо" },
-      { id: 23, name: "Хиро Симоно", character: "Зеницу Агацума" },
-      { id: 24, name: "Ёсицугу Мацуока", character: "Иноске Хашибира" },
-    ],
-    synopsis:
-      "Танджиро Камадо становится истребителем демонов, чтобы спасти свою сестру Незуко, превращенную в демона, и отомстить за гибель своей семьи.",
-    is_original: true,
-    seasons: buildAnimeSeasons(
-      [
-        { season_number: 1, count: 26 },
-        { season_number: 2, count: 11 },
-        { season_number: 3, count: 11 },
-        { season_number: 4, count: 8 },
-      ],
-      "https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?q=80&w=600&auto=format&fit=crop"
-    ),
-  },
-  {
-    id: "dune-part-two",
-    tmdb_id: 693134,
-    media_type: "movie",
-    title: "Дюна: Часть вторая",
-    original_title: "Dune: Part Two",
-    backdrop_url: "https://images.unsplash.com/photo-1509198397868-475647b2a1e5?q=80&w=1600&auto=format&fit=crop",
-    poster_url: "https://images.unsplash.com/photo-1534447677768-be436bb09401?q=80&w=600&auto=format&fit=crop",
-    release_year: 2024,
-    duration_minutes: 166,
-    genre: "Фантастика / Приключения",
-    rating: 4.9,
-    tagline: "Да пребудет с вами сила пустыни",
-    budget: 190000000,
-    revenue: 711844358,
-    countries: "США, Канада",
-    director: "Дени Вильнёв",
-    cast: [
-      { id: 1, name: "Тимоти Шаламе", character: "Пол Атрейдес" },
-      { id: 2, name: "Зендея", character: "Чани" },
-      { id: 3, name: "Ребекка Фергюсон", character: "Леди Джессика" },
-      { id: 4, name: "Хавьер Бардем", character: "Стилгар" },
-      { id: 5, name: "Остин Батлер", character: "Фейд-Раута" },
-      { id: 6, name: "Флоренс Пью", character: "Принцесса Ирулан" },
-    ],
-    synopsis:
-      "Герцог Пол Атрейдес объединяется с фременами, чтобы отомстить заговорщикам, уничтожившим его семью. Эпическое продолжение борьбы за Арракис.",
-    is_original: false,
-    seasons: [],
-  },
-  {
-    id: "interstellar",
-    tmdb_id: 157336,
-    media_type: "movie",
-    title: "Интерстеллар",
-    original_title: "Interstellar",
-    backdrop_url: "https://images.unsplash.com/photo-1506703719100-a0f3a48c0f86?q=80&w=1600&auto=format&fit=crop",
-    poster_url: "https://images.unsplash.com/photo-1451187580459-43490279c0fa?q=80&w=600&auto=format&fit=crop",
-    release_year: 2014,
-    duration_minutes: 169,
-    genre: "Фантастика / Драма",
-    rating: 4.9,
-    tagline: "Следующий шаг человечества станет величайшим",
-    budget: 165000000,
-    revenue: 701729206,
-    countries: "США, Великобритания",
-    director: "Кристофер Нолан",
-    cast: [
-      { id: 11, name: "Мэттью Макконахи", character: "Купер" },
-      { id: 12, name: "Энн Хэтэуэй", character: "Бренд" },
-      { id: 13, name: "Джессика Честейн", character: "Мёрф" },
-      { id: 14, name: "Майкл Кейн", character: "Профессор Бренд" },
-      { id: 15, name: "Мэтт Дэймон", character: "Манн" },
-    ],
-    synopsis:
-      "Когда засуха приводит человечество к глобальному продовольственному кризису, группа ученых отправляется сквозь червоточину в поисках нового дома для людей.",
-    is_original: false,
-    seasons: [],
-  },
-  {
-    id: "arcane",
-    tmdb_id: 94605,
-    media_type: "tv",
-    title: "Аркейн",
-    original_title: "Arcane: League of Legends",
-    backdrop_url: "https://images.unsplash.com/photo-1563089145-599997674d42?q=80&w=1600&auto=format&fit=crop",
-    poster_url: "https://images.unsplash.com/photo-1579783902614-a3fb3927b675?q=80&w=600&auto=format&fit=crop",
-    release_year: 2024,
-    seasons_count: 2,
-    genre: "Анимация / Экшен",
-    rating: 4.9,
-    tagline: "Каждая легенда с чего-то начинается",
-    countries: "США, Франция",
-    director: "Паскаль Шаррю, Арно Делорд",
-    cast: [
-      { id: 31, name: "Хейли Стайнфелд", character: "Вай" },
-      { id: 32, name: "Элла Пернелл", character: "Джинкс" },
-      { id: 33, name: "Кэти Льюнг", character: "Кейтлин" },
-    ],
-    synopsis:
-      "История двух сестер, Джинкс и Вай, оказавшихся по разные стороны баррикад в войне между технологическим Пилтовером и преступным Зауном.",
-    is_original: false,
-    seasons: [
-      {
-        season_number: 1,
-        episodes: Array.from({ length: 9 }, (_, i) => ({
-          id: `arcane-1-${i + 1}`,
-          number: i + 1,
-          title: `Серия ${i + 1}`,
-          thumbnail: "https://images.unsplash.com/photo-1563089145-599997674d42?q=80&w=600&auto=format&fit=crop",
-          duration_minutes: 41,
-        })),
-      },
-      {
-        season_number: 2,
-        episodes: Array.from({ length: 9 }, (_, i) => ({
-          id: `arcane-2-${i + 1}`,
-          number: i + 1,
-          title: `Серия ${i + 1}`,
-          thumbnail: "https://images.unsplash.com/photo-1563089145-599997674d42?q=80&w=600&auto=format&fit=crop",
-          duration_minutes: 42,
-        })),
-      },
-    ],
-  },
-  {
-    id: "breaking-bad",
-    tmdb_id: 1396,
-    media_type: "tv",
-    title: "Во все тяжкие",
-    original_title: "Breaking Bad",
-    backdrop_url: "https://images.unsplash.com/photo-1534447677768-be436bb09401?q=80&w=1600&auto=format&fit=crop",
-    poster_url: "https://images.unsplash.com/photo-1509198397868-475647b2a1e5?q=80&w=600&auto=format&fit=crop",
-    release_year: 2013,
-    seasons_count: 5,
-    genre: "Криминал / Драма",
-    rating: 5.0,
-    synopsis:
-      "Школьный учитель химии Уолтер Уайт узнает о смертельном диагнозе и вместе с бывшим учеником начинает варить метамфетамин, чтобы обеспечить семью.",
-    is_original: false,
-    seasons: [
-      {
-        season_number: 1,
-        episodes: Array.from({ length: 7 }, (_, i) => ({
-          id: `bb-1-${i + 1}`,
-          number: i + 1,
-          title: `Серия ${i + 1}`,
-          thumbnail: "https://images.unsplash.com/photo-1534447677768-be436bb09401?q=80&w=600&auto=format&fit=crop",
-          duration_minutes: 48,
-        })),
-      },
-      {
-        season_number: 2,
-        episodes: Array.from({ length: 13 }, (_, i) => ({
-          id: `bb-2-${i + 1}`,
-          number: i + 1,
-          title: `Серия ${i + 1}`,
-          thumbnail: "https://images.unsplash.com/photo-1534447677768-be436bb09401?q=80&w=600&auto=format&fit=crop",
-          duration_minutes: 47,
-        })),
-      },
-      {
-        season_number: 3,
-        episodes: Array.from({ length: 13 }, (_, i) => ({
-          id: `bb-3-${i + 1}`,
-          number: i + 1,
-          title: `Серия ${i + 1}`,
-          thumbnail: "https://images.unsplash.com/photo-1534447677768-be436bb09401?q=80&w=600&auto=format&fit=crop",
-          duration_minutes: 47,
-        })),
-      },
-      {
-        season_number: 4,
-        episodes: Array.from({ length: 13 }, (_, i) => ({
-          id: `bb-4-${i + 1}`,
-          number: i + 1,
-          title: `Серия ${i + 1}`,
-          thumbnail: "https://images.unsplash.com/photo-1534447677768-be436bb09401?q=80&w=600&auto=format&fit=crop",
-          duration_minutes: 47,
-        })),
-      },
-      {
-        season_number: 5,
-        episodes: Array.from({ length: 16 }, (_, i) => ({
-          id: `bb-5-${i + 1}`,
-          number: i + 1,
-          title: `Серия ${i + 1}`,
-          thumbnail: "https://images.unsplash.com/photo-1534447677768-be436bb09401?q=80&w=600&auto=format&fit=crop",
-          duration_minutes: 47,
-        })),
-      },
-    ],
-  },
-  {
-    id: "oppenheimer",
-    tmdb_id: 872585,
-    media_type: "movie",
-    title: "Оппенгеймер",
-    original_title: "Oppenheimer",
-    backdrop_url: "https://images.unsplash.com/photo-1509198397868-475647b2a1e5?q=80&w=1600&auto=format&fit=crop",
-    poster_url: "https://images.unsplash.com/photo-1534447677768-be436bb09401?q=80&w=600&auto=format&fit=crop",
-    release_year: 2023,
-    duration_minutes: 180,
-    genre: "Драма / История",
-    rating: 4.9,
-    synopsis: "История американского физика-теоретика Роберта Оппенгеймера, руководителя Манхэттенского проекта во время Второй мировой войны.",
-    is_original: false,
-    seasons: [],
-  },
-  {
-    id: "jujutsu-kaisen",
-    tmdb_id: 95479,
-    media_type: "tv",
-    title: "Магическая битва",
-    original_title: "Jujutsu Kaisen",
-    backdrop_url: "https://images.unsplash.com/photo-1578632767115-351597cf2477?q=80&w=1600&auto=format&fit=crop",
-    poster_url: "https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?q=80&w=600&auto=format&fit=crop",
-    release_year: 2020,
-    seasons_count: 2,
-    genre: "Аниме / Экшен",
-    rating: 4.9,
-    synopsis: "Юдзи Итадори проглатывает палец могущественного демона Рёмэна Сукуны и вступает в Токийский магический колледж.",
-    is_original: true,
-    seasons: buildAnimeSeasons(
-      [
-        { season_number: 1, count: 24 },
-        { season_number: 2, count: 23 },
-      ],
-      "https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?q=80&w=600&auto=format&fit=crop"
-    ),
-  },
-];
-
-interface RawTmdbItem {
-  id: number;
-  title?: string;
-  name?: string;
-  original_name?: string;
-  original_title?: string;
-  media_type?: string;
-  poster_path?: string;
-  backdrop_path?: string;
-  overview?: string;
-  release_date?: string;
-  first_air_date?: string;
-  vote_average?: number;
-  vote_count?: number;
-  genre_ids?: number[];
-  number_of_seasons?: number;
-  status?: string;
-}
 
 // Filter out titles that have not yet been released or are unstreamable announcements
 const isMediaReleased = (item: RawTmdbItem): boolean => {
@@ -468,94 +155,6 @@ interface RussianMediaInfo {
   iframe_url?: string | null;
   russian_title?: string | null;
 }
-
-interface RoomParticipant {
-  user_email: string;
-  user_name: string;
-  is_host: boolean;
-  last_seen_epoch: number;
-}
-
-interface WatchRoom {
-  room_code: string;
-  host_email: string;
-  host_name: string;
-  media_id: string;
-  media_title: string;
-  media_type: string;
-  poster_path?: string | null;
-  season: number;
-  episode: number;
-  current_time_seconds: number;
-  is_playing: boolean;
-  updated_by: string;
-  updated_at_epoch: number;
-  participants: RoomParticipant[];
-}
-
-type BalancerMirror =
-  | "vidlink_pro"
-  | "kodik_ru"
-  | "autoembed"
-  | "vidsrc_pm"
-  | "multiembed"
-  | "vidsrc_to"
-  | "alloha_ru"
-  | "anilibria"
-  | "embess_ru"
-  | "smotrim_ru";
-
-
-
-// Reliable image URL helper with proxy caching (bypasses Russian ISP / Cloudflare blocks on image.tmdb.org)
-const formatMediaImg = (path: string | undefined, size: "w500" | "original" = "w500"): string => {
-  if (!path) return size === "original" ? INITIAL_LIBRARY[0].backdrop_url : INITIAL_LIBRARY[0].poster_url;
-  if (path.startsWith("http")) return path;
-  return `https://wsrv.nl/?url=https://image.tmdb.org/t/p/${size}${path}`;
-};
-
-// Detect Android TV / Smart TV user agent or previous user preference
-const detectTvEnvironment = (): boolean => {
-  if (typeof window === "undefined") return false;
-  const ua = (navigator.userAgent || "").toLowerCase();
-  const isTvUa =
-    ua.includes("android tv") ||
-    ua.includes("smarttv") ||
-    ua.includes("googletv") ||
-    ua.includes("tizen") ||
-    ua.includes("webos") ||
-    ua.includes("appletv") ||
-    ua.includes("crkey") ||
-    ua.includes("bravia") ||
-    ua.includes("aftt") ||
-    ua.includes("aftm") ||
-    ua.includes("mibox") ||
-    ua.includes("mi box") ||
-    ua.includes("shield") ||
-    ua.includes("dtv") ||
-    ua.includes("smart-tv") ||
-    ua.includes("hbbtv") ||
-    ua.includes("netcast") ||
-    ua.includes("viera") ||
-    ua.includes("roku") ||
-    ua.includes("firetv");
-  if (isTvUa) return true;
-  const isAndroid = ua.includes("android");
-  const noTouch = !("ontouchstart" in window) && navigator.maxTouchPoints === 0;
-  if (isAndroid && noTouch) return true;
-
-  // On pure desktop (macOS / Windows / Desktop Linux), default to desktop PC mode
-  const isDesktop =
-    (ua.includes("windows nt") || ua.includes("macintosh") || (ua.includes("linux") && !ua.includes("android"))) &&
-    !isTvUa;
-  if (isDesktop) {
-    return localStorage.getItem("has_tv_mode_manual") === "true";
-  }
-
-  const saved = localStorage.getItem("has_tv_mode");
-  if (saved !== null) return saved === "true";
-  return false;
-};
 
 export default function Cinema({
   currentUser,
@@ -875,7 +474,9 @@ export default function Cinema({
         currentTimeSeconds: currentPlaybackRef.current.currentTime || 0,
         season: playingSeasonNumber,
         episode: playingEpisode?.number || 1,
-      }).catch(() => {});
+      }).catch((err) => {
+        console.warn("Failed to sync play state to room:", err);
+      });
     }
   }, [
     sendIframePlaybackCommand,
@@ -907,7 +508,9 @@ export default function Cinema({
         currentTimeSeconds: currentPlaybackRef.current.currentTime || 0,
         season: playingSeasonNumber,
         episode: playingEpisode?.number || 1,
-      }).catch(() => {});
+      }).catch((err) => {
+        console.warn("Failed to sync pause state to room:", err);
+      });
     }
   }, [
     sendIframePlaybackCommand,
@@ -1026,7 +629,9 @@ export default function Cinema({
         currentTimeSeconds: targetTime,
         season: playingSeasonNumber,
         episode: playingEpisode?.number || 1,
-      }).catch(() => {});
+      }).catch((err) => {
+        console.warn("Failed to sync seek to room:", err);
+      });
     }
 
     showTvToast(secondsDelta > 0 ? `+${secondsDelta} сек` : `${secondsDelta} сек`, secondsDelta > 0 ? "⏩" : "⏪", 1000);
@@ -1718,7 +1323,32 @@ export default function Cinema({
       const hls = new Hls({
         enableWorker: true,
         lowLatencyMode: false,
-        backBufferLength: 60,
+        backBufferLength: 90,
+        maxBufferLength: 30,
+        maxMaxBufferLength: 600,
+        maxBufferSize: 60 * 1000 * 1000,
+        maxBufferHole: 0.5,
+        highBufferWatchdogPeriod: 2,
+        nudgeOffset: 0.1,
+        nudgeMaxRetry: 3,
+        maxFragLookUpTolerance: 0.25,
+        liveSyncDurationCount: 3,
+        liveMaxLatencyDurationCount: 10,
+        liveDurationInfinity: false,
+        preferManagedMediaSource: true,
+        progressive: true,
+        abrEwmaDefaultEstimate: 500000,
+        abrBandWidthFactor: 0.95,
+        abrBandWidthUpFactor: 0.7,
+        abrMaxWithRealBitrate: false,
+        maxStarvationDelay: 4,
+        maxLoadingDelay: 4,
+        minAutoBitrate: 0,
+        startLevel: -1,
+        capLevelOnFPSDrop: false,
+        capLevelToPlayerSize: false,
+        testBandwidth: true,
+        debug: false,
       });
       hlsInstanceRef.current = hls;
       hls.loadSource(anilibriaStreamUrl);
@@ -2346,8 +1976,8 @@ export default function Cinema({
       }
       setTimeout(() => {
         isSyncingFromRemoteRef.current = false;
-      }, 2000);
-    }, 1500);
+      }, 500);
+    }, 300);
   }, [
     trendingAll,
     popularMovies,
@@ -2366,7 +1996,14 @@ export default function Cinema({
     setSelectedMedia(media);
     setWatchRoomModalTab("create");
     setShowWatchRoomModal(true);
+    setRoomError(null);
     playTvSelectBeep();
+  };
+
+  const handleCloseWatchRoomModal = () => {
+    setShowWatchRoomModal(false);
+    setRoomError(null);
+    setJoinRoomCodeInput("");
   };
 
   const handleCreateRoom = async (mediaToUse?: CinemaMediaItem) => {
@@ -2375,6 +2012,17 @@ export default function Cinema({
       setRoomError("Выберите фильм или сериал для совместного просмотра");
       return;
     }
+
+    if (!targetMedia.id || !targetMedia.title) {
+      setRoomError("Некорректные данные медиа. Попробуйте другой контент.");
+      return;
+    }
+
+    if (activeWatchRoom) {
+      setRoomError("Вы уже находитесь в комнате. Сначала выйдите из текущей.");
+      return;
+    }
+
     setIsRoomBusy(true);
     setRoomError(null);
     try {
@@ -2392,6 +2040,7 @@ export default function Cinema({
       });
 
       setActiveWatchRoom(room);
+      setShowWatchRoomModal(false);
       showTvToast(`Комната создана! Код: ${room.room_code}`, "🍿", 4000);
 
       // If not currently playing, start playback of target media
@@ -2406,11 +2055,22 @@ export default function Cinema({
   };
 
   const handleJoinRoom = async (codeToJoin?: string) => {
-    const code = (codeToJoin || joinRoomCodeInput).trim();
+    const code = (codeToJoin || joinRoomCodeInput).trim().toUpperCase();
     if (!code) {
       setRoomError("Введите 6-значный код комнаты");
       return;
     }
+
+    if (code.length !== 6) {
+      setRoomError("Код комнаты должен быть 6 символов");
+      return;
+    }
+
+    if (activeWatchRoom) {
+      setRoomError("Вы уже находитесь в комнате. Сначала выйдите из текущей.");
+      return;
+    }
+
     setIsRoomBusy(true);
     setRoomError(null);
     try {
@@ -2422,6 +2082,7 @@ export default function Cinema({
 
       setActiveWatchRoom(room);
       setJoinRoomCodeInput("");
+      handleCloseWatchRoomModal();
       showTvToast(`Вы вошли в комнату ${room.room_code}!`, "🍿", 3000);
 
       // Sync player to room media and position
@@ -2440,9 +2101,13 @@ export default function Cinema({
         roomCode: activeWatchRoom.room_code,
         userEmail: currentUser?.email || "anonymous@has.local",
       });
-    } catch {}
-    setActiveWatchRoom(null);
-    showTvToast("Вы вышли из комнаты совместного просмотра", "🚪", 2000);
+      setActiveWatchRoom(null);
+      showTvToast("Вы вышли из комнаты совместного просмотра", "🚪", 2000);
+    } catch (err) {
+      console.warn("Failed to leave room gracefully:", err);
+      setActiveWatchRoom(null);
+      showTvToast("Соединение с комнатой потеряно", "⚠️", 2000);
+    }
   };
 
   // Polling loop for active Watch Together room
@@ -2496,10 +2161,10 @@ export default function Cinema({
             }
           }
 
-          // 3. Seek / Time drift check (> 3.5 seconds)
+          // 3. Seek / Time drift check (> 1.5 seconds)
           const localTime = currentPlaybackRef.current.currentTime || 0;
           const drift = Math.abs(localTime - room.current_time_seconds);
-          if (drift > 3.5) {
+          if (drift > 1.5) {
             seekToPlayerTime(room.current_time_seconds);
             const mins = Math.floor(room.current_time_seconds / 60);
             const secs = Math.floor(room.current_time_seconds % 60);
@@ -2509,12 +2174,12 @@ export default function Cinema({
 
           setTimeout(() => {
             isSyncingFromRemoteRef.current = false;
-          }, 1500);
+          }, 400);
         }
       } catch (err) {
         console.warn("Room polling error:", err);
       }
-    }, 1800);
+    }, 800);
 
     return () => clearInterval(interval);
   }, [
@@ -6039,7 +5704,7 @@ export default function Cinema({
       {showWatchRoomModal && (
         <div
           className="has-cinema-watch-room-overlay"
-          onClick={() => setShowWatchRoomModal(false)}
+          onClick={handleCloseWatchRoomModal}
         >
           <div
             className="has-cinema-watch-room-modal"
@@ -6058,7 +5723,7 @@ export default function Cinema({
               <button
                 type="button"
                 className="has-cinema-watch-room-close"
-                onClick={() => setShowWatchRoomModal(false)}
+                onClick={handleCloseWatchRoomModal}
                 data-tv-focusable="true"
               >
                 ✕
